@@ -10,8 +10,6 @@ import math
 CLIPMIN = 1e-5
 
 
-
-
 def round_ste(x: torch.Tensor):
     """
     Implement Straight-Through Estimator for rounding operation.
@@ -19,19 +17,18 @@ def round_ste(x: torch.Tensor):
     return (x.round() - x).detach() + x
 
 
-
 class UniformAffineQuantizer(nn.Module):
     def __init__(
-        self,
-        n_bits: int = 8,
-        symmetric: bool = False,
-        per_channel_axes=[],
-        metric="minmax",
-        dynamic=False,
-        dynamic_method="per_cluster",
-        group_size=None,
-        shape=None,
-        lwc=False
+            self,
+            n_bits: int = 8,
+            symmetric: bool = False,
+            per_channel_axes=[],
+            metric="minmax",
+            dynamic=False,
+            dynamic_method="per_cluster",
+            group_size=None,
+            shape=None,
+            lwc=False
     ):
         """
         support cluster quantize
@@ -58,39 +55,53 @@ class UniformAffineQuantizer(nn.Module):
         self.dynamic_method = dynamic_method
         self.deficiency = 0
         self.lwc = lwc
-        
-        init_value = 4.             # inti value of learnable weight clipping
+
+        init_value = 4.  # inti value of learnable weight clipping
         if lwc:
             if group_size:
-                dim1 = int(shape[0]*math.ceil(shape[1]/group_size))
-                self.deficiency = shape[-1]%group_size
+                dim1 = int(shape[0] * math.ceil(shape[1] / group_size))
+                self.deficiency = shape[-1] % group_size
                 if self.deficiency > 0:
                     self.deficiency = group_size - self.deficiency
-                    assert self.symmetric   # support for mlc-llm quantization
+                    assert self.symmetric  # support for mlc-llm quantization
             else:
                 dim1 = shape[0]
-            self.upbound_factor = nn.Parameter(torch.ones(dim1,1).cuda()*init_value)
-            self.lowbound_factor = nn.Parameter(torch.ones(dim1,1).cuda()*init_value)
+            self.upbound_factor = nn.Parameter(torch.ones(dim1, 1).cuda() * init_value)
+            self.lowbound_factor = nn.Parameter(torch.ones(dim1, 1).cuda() * init_value)
         self.sigmoid = nn.Sigmoid()
 
         self.enable = True
         self.group_size = group_size
 
         self.history_length = 20
-        self.alpha = 0.4
         self.is_started_eval = nn.Parameter(
             torch.Tensor([0]), requires_grad=False
         )
         self.num_iters = nn.Parameter(
             torch.Tensor([0]), requires_grad=False
         )
-        self.xmin = None
-        self.xmax = None
+        self.xmin = torch.nn.Parameter(
+            torch.Tensor([0.0]).cuda(),
+            requires_grad=False
+        )
+        self.xmax = torch.nn.Parameter(
+            torch.Tensor([0.0]).cuda(),
+            requires_grad=False
+        )
         self.xmins = nn.Parameter(
             torch.Tensor([0] * self.history_length).cuda(), requires_grad=False
         )
         self.xmaxs = nn.Parameter(
             torch.Tensor([0] * self.history_length).cuda(), requires_grad=False
+        )
+
+        self.ema_alpha_factor = nn.Parameter(
+            torch.ones(1, ).cuda() * init_value,  # * 1.0
+            requires_grad=True
+        )
+        self.ema_beta_factor = nn.Parameter(
+            torch.ones(1, ).cuda() * init_value,  # * 1.0
+            requires_grad=True
         )
 
     def change_n_bits(self, n_bits):
@@ -100,11 +111,11 @@ class UniformAffineQuantizer(nn.Module):
 
     def fake_quant(self, x, scale, round_zero_point):
         if self.deficiency > 0:
-            pad_zeros = torch.zeros((x.shape[0],self.deficiency),dtype=x.dtype,device=x.device)
-            x = torch.cat((x,pad_zeros),dim=1)
-        
+            pad_zeros = torch.zeros((x.shape[0], self.deficiency), dtype=x.dtype, device=x.device)
+            x = torch.cat((x, pad_zeros), dim=1)
+
         if self.group_size:
-            assert len(x.shape)==2, "only support linear layer now"
+            assert len(x.shape) == 2, "only support linear layer now"
             dim1, dim2 = x.shape
             x = x.reshape(-1, self.group_size)
         x_int = round_ste(x / scale)
@@ -118,20 +129,19 @@ class UniformAffineQuantizer(nn.Module):
         if self.group_size:
             x_dequant = x_dequant.reshape(dim1, dim2)
         if self.deficiency > 0:
-            x_dequant = x_dequant[:,:-self.deficiency]
+            x_dequant = x_dequant[:, :-self.deficiency]
         return x_dequant
-    
 
     def forward(self, x: torch.Tensor):
         if self.n_bits >= 16 or not self.enable:
             return x
         if self.metric == "fix0to1":
-            return x.mul_(2**self.n_bits-1).round_().div_(2**self.n_bits-1)
+            return x.mul_(2 ** self.n_bits - 1).round_().div_(2 ** self.n_bits - 1)
 
         if self.dynamic_method == "per_token" or self.dynamic_method == "per_channel":
             self.per_token_dynamic_calibration(x)
         else:
-            raise NotImplementedError()   
+            raise NotImplementedError()
 
         x_dequant = self.fake_quant(x, self.scale, self.round_zero_point)
         return x_dequant
@@ -139,11 +149,11 @@ class UniformAffineQuantizer(nn.Module):
     def per_token_dynamic_calibration(self, x):
         if self.group_size:
             if self.deficiency == 0:
-                x = x.reshape(-1,self.group_size)
+                x = x.reshape(-1, self.group_size)
             else:
-                pad_zeros = torch.zeros((x.shape[0],self.deficiency),dtype=x.dtype,device=x.device)
-                x = torch.cat((x,pad_zeros),dim=1)
-                x = x.reshape(-1,self.group_size)
+                pad_zeros = torch.zeros((x.shape[0], self.deficiency), dtype=x.dtype, device=x.device)
+                x = torch.cat((x, pad_zeros), dim=1)
+                x = x.reshape(-1, self.group_size)
         reduce_shape = [-1]
 
         if self.lwc:  # Weight
@@ -174,12 +184,20 @@ class UniformAffineQuantizer(nn.Module):
         elif self.num_iters == self.history_length:
             # assert self.num_iters >= self.max_num_iters
 
-            self.xmin = torch.nn.Parameter(
-                torch.mean(self.xmins)
-            )
-            self.xmax = torch.nn.Parameter(
-                torch.mean(self.xmaxs)
-            )
+            # self.xmin = torch.nn.Parameter(
+            #     torch.mean(self.xmins).reshape(1,)
+            # )
+            # self.xmax = torch.nn.Parameter(
+            #     torch.mean(self.xmaxs).reshape(1,)
+            # )
+
+            with torch.no_grad():
+                self.xmin.data[0] = float(torch.max(self.xmins))
+                self.xmax.data[0] = float(torch.min(self.xmaxs))
+
+            # with torch.no_grad():
+            #     self.ema_alpha_factor.data *= abs(float(self.xmax))
+            #     self.ema_beta_factor.data *= abs(float(self.xmin))
 
             xmin = self.xmin
             xmax = self.xmax
@@ -188,7 +206,8 @@ class UniformAffineQuantizer(nn.Module):
         elif self.training:
             if self.num_iters % 100 == 0:
                 # print(f'!!! I am alive and I do not update stats')
-                print(f'X_min: {float(self.xmin)}. X_max: {float(self.xmax)}.')
+                # print(f'X_min: {float(self.xmin)}. X_max: {float(self.xmax)}.')
+                print(f'Alpha: {float(self.ema_alpha_factor)}. Beta: {float(self.ema_beta_factor)}.')
 
             xmin = self.xmin
             xmax = self.xmax
@@ -206,17 +225,59 @@ class UniformAffineQuantizer(nn.Module):
             print(f'!!! WTF !!!')
 
         if self.lwc:
-            xmax = self.sigmoid(self.upbound_factor)*xmax
-            xmin = self.sigmoid(self.lowbound_factor)*xmin
+            # print(f'Up: {self.upbound_factor}.')
+            xmax = self.sigmoid(self.upbound_factor) * xmax
+            xmin = self.sigmoid(self.lowbound_factor) * xmin
+        elif self.num_iters - 1 >= self.history_length:
+            # xmax = 1.0 * self.ema_alpha_factor
+            # xmin = -1.0 * self.ema_beta_factor
+
+            xmax = 1.0 * self.sigmoid(self.ema_alpha_factor) * abs(float(self.xmax))
+            xmin = -1.0 * self.sigmoid(self.ema_beta_factor) * abs(float(self.xmin))
 
         if self.symmetric:
-            abs_max = torch.max(xmax.abs(),xmin.abs())
-            scale = abs_max / (2**(self.n_bits-1)-1)
+            assert False  # TODO: debug
+
+            abs_max = torch.max(xmax.abs(), xmin.abs())
+            scale = abs_max / (2 ** (self.n_bits - 1) - 1)
             self.scale = scale.clamp(min=CLIPMIN, max=1e4)
-            zero_point = (2**(self.n_bits-1)-1)*torch.ones_like(self.scale)
+            zero_point = (2 ** (self.n_bits - 1) - 1) * torch.ones_like(self.scale)
         else:
+            # if not self.lwc:
+            #     xmin = x.amin(reduce_shape, keepdim=True)
+            #     xmax = x.amax(reduce_shape, keepdim=True)
+
             range = xmax - xmin
-            scale = range / (2**self.n_bits-1)
+
+            # if self.lwc:
+            #     torch.mean(range).backward()
+            #     print(f'Up grad: {self.upbound_factor.grad}.')
+
+            # if not self.lwc and self.num_iters - 1 >= self.history_length:
+            # print(self.lwc, self.num_iters, self.history_length)
+            # print(self.xmax, self.xmin)
+            # print(xmax, xmin)
+            # print(f'Alpha: {self.ema_alpha_factor}.')
+
+            # range *= self.sigmoid(self.ema_alpha_factor)
+            # range *= self.sigmoid(self.ema_alpha_factor)
+
+            # range.backward()
+            # print(f'Alpha grad: {self.ema_alpha_factor.grad}.')
+
+            scale = range / (2 ** self.n_bits - 1)
             self.scale = scale.clamp(min=CLIPMIN, max=1e4)
+
+            # if not self.lwc and self.num_iters - 1 >= self.history_length:
+            # zero_point *= self.sigmoid(self.beta_factor)
+            # print('!!! Zero point with beta.')
+            # zero_point = -(xmin + self.ema_beta_factor) / (self.scale)
+            # else:
+
             zero_point = -(xmin) / (self.scale)
+
+            # if not self.lwc and self.num_iters - 1 >= self.history_length:
+            #     self.scale.backward()
+            #     print(f'Alpha grad: {self.ema_alpha_factor.grad}.')
+
         self.round_zero_point = zero_point.clamp(min=-1e4, max=1e4).round()

@@ -76,6 +76,23 @@ class UniformAffineQuantizer(nn.Module):
         self.enable = True
         self.group_size = group_size
 
+        self.history_length = 20
+        self.alpha = 0.4
+        self.is_started_eval = nn.Parameter(
+            torch.Tensor([0]), requires_grad=False
+        )
+        self.num_iters = nn.Parameter(
+            torch.Tensor([0]), requires_grad=False
+        )
+        self.xmin = None
+        self.xmax = None
+        self.xmins = nn.Parameter(
+            torch.Tensor([0] * self.history_length).cuda(), requires_grad=False
+        )
+        self.xmaxs = nn.Parameter(
+            torch.Tensor([0] * self.history_length).cuda(), requires_grad=False
+        )
+
     def change_n_bits(self, n_bits):
         self.n_bits = n_bits
         self.qmin = 0
@@ -128,11 +145,70 @@ class UniformAffineQuantizer(nn.Module):
                 x = torch.cat((x,pad_zeros),dim=1)
                 x = x.reshape(-1,self.group_size)
         reduce_shape = [-1]
-        xmin = x.amin(reduce_shape, keepdim=True)
-        xmax =  x.amax(reduce_shape, keepdim=True)
+
+        if self.lwc:  # Weight
+            if self.num_iters % 100 == 0:
+                # print(f'!!! I am alive and I do not update stats')
+                print(f'Up: {float(self.upbound_factor[0])}. Low: {float(self.lowbound_factor[0])}.')
+
+            xmin = x.amin(reduce_shape, keepdim=True)
+            xmax = x.amax(reduce_shape, keepdim=True)
+
+            self.num_iters += 1
+        elif self.num_iters < self.history_length:
+            # xmin = x.amin(reduce_shape, keepdim=True)
+            # xmax = x.amax(reduce_shape, keepdim=True)
+            xmin = x.min()
+            xmax = x.max()
+
+            self.xmins[int(self.num_iters)] = float(x.min())
+            self.xmaxs[int(self.num_iters)] = float(x.max())
+
+            # num_iters = int(self.num_iters)
+
+            # with torch.no_grad():
+            #     self.xmin = (num_iters * self.xmin + xmin) / (num_iters + 1)
+            #     self.xmax = (num_iters * self.xmax + xmax) / (num_iters + 1)
+
+            self.num_iters += 1
+        elif self.num_iters == self.history_length:
+            # assert self.num_iters >= self.max_num_iters
+
+            self.xmin = torch.nn.Parameter(
+                torch.mean(self.xmins)
+            )
+            self.xmax = torch.nn.Parameter(
+                torch.mean(self.xmaxs)
+            )
+
+            xmin = self.xmin
+            xmax = self.xmax
+
+            self.num_iters += 1
+        elif self.training:
+            if self.num_iters % 100 == 0:
+                # print(f'!!! I am alive and I do not update stats')
+                print(f'X_min: {float(self.xmin)}. X_max: {float(self.xmax)}.')
+
+            xmin = self.xmin
+            xmax = self.xmax
+
+            self.num_iters += 1
+        elif not self.training:
+            if self.is_started_eval == 0:
+                print('!!! EVALUATING !!!')
+
+                self.is_started_eval += 1
+
+            xmin = self.xmin
+            xmax = self.xmax
+        else:
+            print(f'!!! WTF !!!')
+
         if self.lwc:
             xmax = self.sigmoid(self.upbound_factor)*xmax
             xmin = self.sigmoid(self.lowbound_factor)*xmin
+
         if self.symmetric:
             abs_max = torch.max(xmax.abs(),xmin.abs())
             scale = abs_max / (2**(self.n_bits-1)-1)

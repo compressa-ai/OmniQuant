@@ -184,7 +184,9 @@ def omniquant(
                 qlayer.float()      # required for AMP training
             # create optimizer
             optimizer = torch.optim.AdamW(
-                [{'params':qlayer.let_parameters(use_shift),'lr':args.let_lr}, {'params':qlayer.lwc_parameters(),'lr':args.lwc_lr}],weight_decay=args.wd)
+                [{'params': qlayer.let_parameters(use_shift), 'lr':args.let_lr},
+                 {'params': qlayer.lwc_parameters(), 'lr':args.lwc_lr}],
+                weight_decay=args.wd)
             loss_scaler = utils.NativeScalerWithGradNormCount()
             
             for epochs in range(args.epochs):

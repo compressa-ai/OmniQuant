@@ -183,8 +183,19 @@ def omniquant(
             with torch.no_grad():
                 qlayer.float()      # required for AMP training
             # create optimizer
+            old_let_params = qlayer.let_parameters(use_shift)
+            old_let_params = list(old_let_params)
+            print(f'Old LET params: {len(old_let_params)}.')
+
+            new_let_params = []
+            for j in range(i):
+                new_let_params += list(layers[j].let_parameters(use_shift))
+            new_let_params += old_let_params
+            # new_let_params = iter(new_let_params)
+            print(f'New LET params: {len(new_let_params)}.')
+
             optimizer = torch.optim.AdamW(
-                [{'params': qlayer.let_parameters(use_shift), 'lr':args.let_lr},
+                [{'params': old_let_params, 'lr':args.let_lr},
                  {'params': qlayer.lwc_parameters(), 'lr':args.lwc_lr}],
                 weight_decay=args.wd)
             loss_scaler = utils.NativeScalerWithGradNormCount()
@@ -215,6 +226,59 @@ def omniquant(
                 logger.info(f"layer {i} iter {epochs} loss:{loss_mean} norm:{norm_mean} max memory_allocated {torch.cuda.max_memory_allocated(lm._device) / 1024**2} ")
             qlayer.clear_temp_variable()
             del optimizer
+
+
+        if i > 0 and args.epochs > 0:
+            with torch.no_grad():
+                qlayer.float()  # required for AMP training
+            # create optimizer
+            old_let_params = qlayer.let_parameters(use_shift)
+            old_let_params = list(old_let_params)
+            print(f'Old LET params: {len(old_let_params)}.')
+
+            new_let_params = []
+            new_let_params += list(layers[i-1].let_parameters(use_shift))
+            new_let_params += old_let_params
+            # new_let_params = iter(new_let_params)
+            print(f'New LET params: {len(new_let_params)}.')
+
+            optimizer = torch.optim.AdamW(
+                [{'params': new_let_params, 'lr': args.let_lr},
+                 {'params': qlayer.lwc_parameters(), 'lr': args.lwc_lr}],
+                weight_decay=args.wd)
+            loss_scaler = utils.NativeScalerWithGradNormCount()
+
+            for epochs in range(args.epochs // 2):
+                loss_list = []
+                norm_list = []
+                for j in range(args.nsamples // args.batch_size):
+                    index = j * args.batch_size
+                    # obtain output of quantization model
+                    with torch.cuda.amp.autocast():
+                        qlayer.smooth_and_quant_temporary()
+                        quant_out = \
+                        qlayer(quant_inps[index:index + args.batch_size, ], attention_mask=attention_mask_batch,
+                               position_ids=position_ids)[0]
+                        loss = loss_func(fp_inps[index:index + args.batch_size, ], quant_out)
+                        if args.aug_loss:
+                            loss += loss_func(fp_inps_2[index:index + args.batch_size, ], quant_out)
+                    if not math.isfinite(loss.item()):
+                        logger.info("Loss is NAN, stopping training")
+                        pdb.set_trace()
+
+                    loss_list.append(loss.data)
+                    optimizer.zero_grad()
+                    norm = loss_scaler(loss, optimizer, parameters=qlayer.omni_parameters(use_shift))
+                    norm_list.append(norm.data)
+
+                loss_mean = torch.stack(loss_list).mean()
+                norm_mean = torch.stack(norm_list).mean()
+                logger.info(
+                    f"(new) layer {i} iter {epochs} loss:{loss_mean} norm:{norm_mean} max memory_allocated {torch.cuda.max_memory_allocated(lm._device) / 1024 ** 2} ")
+            qlayer.clear_temp_variable()
+            del optimizer
+
+
 
         # real smooth and quantization
         qlayer.smooth_and_quant_inplace()

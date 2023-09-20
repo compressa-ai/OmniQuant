@@ -209,18 +209,28 @@ def main():
     parser.add_argument("--w_dynamic_method", type=str, default="per_channel", choices=["per_channel"])
     parser.add_argument("--limit", type=int, default=-1)
     parser.add_argument("--multigpu", action="store_true", help="at eval, map model to multiple gpus")
+
+    parser.add_argument('--run_awq', action='store_true',
+                        help="perform awq search process")
     parser.add_argument('--load_awq', type=str, default=None,
                         help="load the awq search results")
+    parser.add_argument('--no_zero_point', action='store_true',
+                        help="disable awq zero_point")
+    parser.add_argument('--dump_awq', type=str, default=None,
+                        help="save the awq search results")
 
     args = parser.parse_args()
     random.seed(args.seed)
     np.random.seed(args.seed)
     torch.manual_seed(args.seed)
     torch.cuda.manual_seed(args.seed)
-    
+
     # check
     if args.epochs > 0:
         assert args.lwc or args.let
+
+    # if args.run_awq:
+    #     assert not args.let
 
     # init logger
     if args.output_dir:

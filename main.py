@@ -16,6 +16,8 @@ import utils
 from pathlib import Path
 from categories import subcategories, categories
 
+from awq.quantize.pre_quant import apply_awq
+
 from models.int_llama_layer import QuantLlamaDecoderLayer
 from models.int_opt_layer import QuantOPTDecoderLayer
 from quantize.int_linear import QuantLinear
@@ -207,6 +209,8 @@ def main():
     parser.add_argument("--w_dynamic_method", type=str, default="per_channel", choices=["per_channel"])
     parser.add_argument("--limit", type=int, default=-1)
     parser.add_argument("--multigpu", action="store_true", help="at eval, map model to multiple gpus")
+    parser.add_argument('--load_awq', type=str, default=None,
+                        help="load the awq search results")
 
     args = parser.parse_args()
     random.seed(args.seed)
@@ -235,6 +239,10 @@ def main():
     args.model_family = args.net.split('-')[0]
     lm = LMClass(args)
     lm.seqlen = 2048
+
+    awq_results = torch.load(args.load_awq, map_location="cpu")
+    apply_awq(lm.model, awq_results)
+
     lm.model.eval()
     logger.info("=== start quantization ===")
     tick = time.time() 

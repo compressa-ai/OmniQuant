@@ -98,8 +98,11 @@ def get_act_shifts(model, dataloader, num_samples=128):
 
 def build_model_and_tokenizer(model_name):
     kwargs = {"torch_dtype": torch.float16, "device_map": "sequential"}
-    tokenizer = AutoTokenizer.from_pretrained(model_name)
+    tokenizer = AutoTokenizer.from_pretrained(model_name, use_fast=False)
+    #assert False
+    
     model = AutoModelForCausalLM.from_pretrained(model_name, **kwargs)
+    # assert False
     return model, tokenizer
 
 def parse_args():
@@ -123,7 +126,13 @@ def parse_args():
 @torch.no_grad()
 def main():
     args = parse_args()
+
+    # assert False
+
     model, tokenizer = build_model_and_tokenizer(args.model)
+
+    #assert False
+
     dataloader, _ = get_loaders(
     args.calib_dataset,
     nsamples=args.num_samples,
@@ -132,6 +141,8 @@ def main():
     seqlen=args.seq_len,
     )
     
+    #assert False
+
     args.net = args.model.split('/')[-1]
     act_scales = get_act_scales(model, dataloader,args.num_samples)
     save_path = os.path.join(args.scales_output_path,f'{args.net}.pt')

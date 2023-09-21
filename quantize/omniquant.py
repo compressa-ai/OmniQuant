@@ -11,9 +11,9 @@ import pdb
 
 
 
-
-
-
+# from memory_profiler import profile
+#
+# @profile
 def omniquant(
     lm,
     args,
@@ -191,19 +191,19 @@ def omniquant(
         gc.collect()
         torch.cuda.empty_cache()
 
-        awq_results = {
-            "scale": [],
-            "clip": [],
-        }
-
-
     
     for i in range(len(layers)):
         logger.info(f"=== Start quantize layer {i} ===")
 
+        print(torch.cuda.mem_get_info()[0] / 1024 ** 3, torch.cuda.mem_get_info()[1] / 1024 ** 3)
 
         if args.run_awq:
             logger.info(f"== AWQ for layer {i} ==")
+
+            awq_results = {
+                "scale": [],
+                "clip": [],
+            }
 
             """
             awq_results = run_awq(
@@ -214,7 +214,12 @@ def omniquant(
             """
 
             layer = layers[i]
-            layer = layer.cuda()
+            # layer = layer.cuda()
+            layer = layer.to(dev)
+
+            for n, p in layer.named_parameters():
+                assert p.is_cuda, f'{n}, {p}, {p.device}'
+
             named_linears = get_named_linears(layer)
 
             # firstly, get input features of all linear layers
@@ -223,57 +228,142 @@ def omniquant(
                 x = x.detach().cpu()
                 feat_dict[name].append(x)
 
+            logger.info(f"Before hooks")
+            print(torch.cuda.mem_get_info()[0] / 1024 ** 3, torch.cuda.mem_get_info()[1] / 1024 ** 3)
+
             input_feat = defaultdict(list)
             handles = []
             for name in named_linears:
                 handles.append(named_linears[name].register_forward_hook(
                     functools.partial(cache_input_hook, name=name,
                                       feat_dict=input_feat)))
-            inps_awq = inps_awq.to(next(layer.parameters()).device)  # in case multi-gpu
+
+            logger.info(f"After append handlers")
+            print(torch.cuda.mem_get_info()[0] / 1024 ** 3, torch.cuda.mem_get_info()[1] / 1024 ** 3)
+
+            # inps_awq = inps_awq.to(next(layer.parameters()).device)  # in case multi-gpu
             # get output as next layer's input
-            inps_awq = layer(inps_awq, **layer_kwargs)[0]
+            new_inps_awq = layer(inps_awq, **layer_kwargs)[0]
+
+            logger.info(f"After update inps_awq")
+            print(torch.cuda.mem_get_info()[0] / 1024 ** 3, torch.cuda.mem_get_info()[1] / 1024 ** 3)
+
+            logger.info(f"{inps_awq.shape}, {inps_awq.device} | {new_inps_awq.shape} {new_inps_awq.device}")
+
             for h in handles:
                 h.remove()
+
+
+            os.makedirs(args.dump_awq, exist_ok=True)
+            torch.save(new_inps_awq, f'{args.dump_awq}/inps_awq_cache.pt')
+
+            for k, v in input_feat.items():
+                del v
+            # del input_feat
+            del inps_awq, new_inps_awq
+            gc.collect()
+            torch.cuda.empty_cache()
+
+            inps_awq = torch.load(f'{args.dump_awq}/inps_awq_cache.pt')
+
+
+
+
+            logger.info(f"After remove handles")
+            print(torch.cuda.mem_get_info()[0] / 1024 ** 3, torch.cuda.mem_get_info()[1] / 1024 ** 3)
+
             # now solve for scaling and clipping
             input_feat = {k: torch.cat(v, dim=0) for k, v in input_feat.items()}
 
+            logger.info(f"After create input_feat")
+            print(torch.cuda.mem_get_info()[0] / 1024 ** 3, torch.cuda.mem_get_info()[1] / 1024 ** 3)
+
+            logger.info(f"After hooks")
+            print(torch.cuda.mem_get_info()[0] / 1024 ** 3, torch.cuda.mem_get_info()[1] / 1024 ** 3)
+
             # Clear GPU memory
             torch.cuda.empty_cache()
+
+            logger.info(f"Auto scale {i}")
+
+            for n, p in layer.named_parameters():
+                assert p.is_cuda, f'{n}, {p}, {p.device}'
 
             if auto_scale:  # if it applies, we should also modify the input_feat with scales
                 scales_list = auto_scale_block(
                     layer, layer_kwargs,
                     w_bit=w_bit, q_config=q_config_awq,
                     input_feat=input_feat,
+                    logger=logger,
                 )
+
+                for n, p in layer.named_parameters():
+                    assert p.is_cuda, f'{n}, {p}, {p.device}'
+
                 # apply_scale(layer, scales_list, input_feat_dict=input_feat)
                 apply_scale(layers[i], scales_list, input_feat_dict=input_feat)
+
+                for n, p in layer.named_parameters():
+                    assert p.is_cuda, f'{n}, {p}, {p.device}'
+
                 # append prefix to make names global
                 awq_results["scale"] += append_str_prefix(scales_list, get_op_name(model, layer) + ".")
 
+            print(torch.cuda.mem_get_info()[0] / 1024 ** 3, torch.cuda.mem_get_info()[1] / 1024 ** 3)
+
+            for n, p in layer.named_parameters():
+                assert p.is_cuda, f'{n}, {p}, {p.device}'
+
             # Clear GPU memory
             torch.cuda.empty_cache()
+
+            logger.info(f"Auto clip {i}")
 
             if mse_range:
                 clip_list = auto_clip_block(
                     layer,
                     w_bit=w_bit, q_config=q_config_awq,
                     input_feat=input_feat, )
+
+                for n, p in layer.named_parameters():
+                    assert p.is_cuda, f'{n}, {p}, {p.device}'
+
                 apply_clip(layer, clip_list)
                 # append prefix to make names global
                 awq_results["clip"] += append_str_prefix(clip_list, get_op_name(model, layer) + ".")
 
-            layer = layer.cpu()
+            print(torch.cuda.mem_get_info()[0] / 1024 ** 3, torch.cuda.mem_get_info()[1] / 1024 ** 3)
+
+            logger.info(f"Save AWQ {i}")
+
+            if args.dump_awq:
+                dirpath = os.path.dirname(args.dump_awq)
+                os.makedirs(dirpath, exist_ok=True)
+
+                torch.save(awq_results, f'{args.dump_awq}/awq_results__layer_{i}')
+                print("AWQ results saved at", args.dump_awq)
+
+            for k, v in awq_results.items():
+                for item in v:
+                    del item
+
+            del awq_results
+
+            # layer = layer.cpu()
             # Haotian: check activation replacement
             del input_feat
             gc.collect()
             torch.cuda.empty_cache()
 
+            print(torch.cuda.mem_get_info()[0] / 1024 ** 3, torch.cuda.mem_get_info()[1] / 1024 ** 3)
 
 
         logger.info(f"== OmniQuant for layer {i} ==")
 
-        layer = layers[i].to(dev)
+        if not args.run_awq:
+            layer = layers[i].to(dev)
+            # layer = layer.to(dev)
+
         qlayer = DecoderLayer(lm.model.config, layer, args)
 
         
@@ -366,16 +456,21 @@ def omniquant(
             qlayer.half()
             layers[i] = qlayer.to("cpu")
 
+        logger.info(f"End of omniquant {i}")
+
+        print(torch.cuda.mem_get_info()[0] / 1024 ** 3, torch.cuda.mem_get_info()[1] / 1024 ** 3)
         
         del layer
         torch.cuda.empty_cache()
 
-    if args.dump_awq:
-        dirpath = os.path.dirname(args.dump_awq)
-        os.makedirs(dirpath, exist_ok=True)
+        print(torch.cuda.mem_get_info()[0] / 1024 ** 3, torch.cuda.mem_get_info()[1] / 1024 ** 3)
 
-        torch.save(awq_results, args.dump_awq)
-        print("AWQ results saved at", args.dump_awq)
+    # if args.dump_awq:
+    #     dirpath = os.path.dirname(args.dump_awq)
+    #     os.makedirs(dirpath, exist_ok=True)
+    #
+    #     torch.save(awq_results, args.dump_awq)
+    #     print("AWQ results saved at", args.dump_awq)
 
     del quant_inps
     del fp_inps

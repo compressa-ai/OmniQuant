@@ -250,8 +250,10 @@ def main():
     lm = LMClass(args)
     lm.seqlen = 2048
 
-    awq_results = torch.load(args.load_awq, map_location="cpu")
-    apply_awq(lm.model, awq_results)
+    if args.load_awq:
+        logger.info("=== Apply AWQ ===")
+        awq_results = torch.load(args.load_awq, map_location="cpu")
+        apply_awq(lm.model, awq_results)
 
     lm.model.eval()
     logger.info("=== start quantization ===")

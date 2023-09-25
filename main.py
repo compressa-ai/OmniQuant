@@ -179,6 +179,9 @@ def main():
 
     parser = argparse.ArgumentParser()
     parser.add_argument("--model", type=str, help="model name of model path")
+    parser.add_argument("--act-scales", type=str, default=None)
+    parser.add_argument("--act-shifts", type=str, default=None)
+
     parser.add_argument("--cache_dir", default="./cache", type=str, help="cache dir of dataset, leading to faster debug")
     parser.add_argument("--output_dir", default="../log/", type=str, help="direction of logging file")
     parser.add_argument("--save_dir", default=None, type=str, help="direction for saving fake quantization model")
@@ -319,8 +322,15 @@ def main():
     
     
     # omniquant
-    act_scales = torch.load(f'./act_scales/{args.net}.pt')
-    act_shifts = torch.load(f'./act_shifts/{args.net}.pt')
+    if args.act_scales is not None:
+        print(f'Loading act scales from {args.act_scales}.')
+        act_scales = torch.load(args.act_scales)
+        act_shifts = torch.load(args.act_shifts)
+    else:
+        print(f'Loading act scales from ./act_scales/{args.net}.pt.')
+        act_scales = torch.load(f'./act_scales/{args.net}.pt')
+        act_shifts = torch.load(f'./act_shifts/{args.net}.pt')
+
     omniquant(
         lm,
         args,

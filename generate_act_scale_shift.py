@@ -20,6 +20,8 @@ except ImportError:
 
 # import pdb
 
+from awq.quantize.pre_quant import apply_awq
+
 
 
 def get_act_scales(model, dataloader, num_samples=128):
@@ -96,14 +98,21 @@ def get_act_shifts(model, dataloader, num_samples=128):
 
 
 
-def build_model_and_tokenizer(model_name):
+def build_model_and_tokenizer(model_name, load_awq):
     kwargs = {"torch_dtype": torch.float16, "device_map": "sequential"}
     tokenizer = AutoTokenizer.from_pretrained(model_name, use_fast=False)
     #assert False
     
     model = AutoModelForCausalLM.from_pretrained(model_name, **kwargs)
-    # assert False
+
+    if load_awq:
+        print('Loading awq...')
+
+        awq_results = torch.load(load_awq, map_location="cpu")
+        apply_awq(model, awq_results)
+
     return model, tokenizer
+
 
 def parse_args():
     parser = argparse.ArgumentParser()
@@ -119,6 +128,9 @@ def parse_args():
     parser.add_argument('--num-samples', type=int, default=128)
     parser.add_argument('--seq-len', type=int, default=2048)
     parser.add_argument("--seed", type=int, default=2, help="Seed for sampling the calibration data.")
+    parser.add_argument('--load_awq', type=str, default=None,
+                        help="load the awq search results")
+
     args = parser.parse_args()
     return args
 
@@ -129,7 +141,9 @@ def main():
 
     # assert False
 
-    model, tokenizer = build_model_and_tokenizer(args.model)
+    model, tokenizer = build_model_and_tokenizer(
+        args.model, args.load_awq
+    )
 
     #assert False
 

@@ -16,7 +16,7 @@ import utils
 from pathlib import Path
 from categories import subcategories, categories
 
-from awq.quantize.pre_quant import apply_awq
+from awq.quantize.pre_quant import apply_awq, freeze_awq
 
 from models.int_llama_layer import QuantLlamaDecoderLayer
 from models.int_opt_layer import QuantOPTDecoderLayer
@@ -249,6 +249,10 @@ def main():
         awq_results = torch.load(args.load_awq, map_location="cuda")
         apply_awq(lm.model, awq_results)
 
+        # Debug
+        # freeze_awq(lm.model, lm.model, awq_results, )
+
+
     lm.model.eval()
     logger.info("=== start quantization ===")
     tick = time.time() 
@@ -332,6 +336,22 @@ def main():
     )
 
     logger.info(time.time() - tick)
+
+
+
+    print('Freezing awq...')
+    from models.LMClass import AutoModelForCausalLM, AutoConfig
+
+    config = AutoConfig.from_pretrained(args.model)
+    orig_model = AutoModelForCausalLM.from_pretrained(
+        args.model, config=config,
+        device_map='cpu', torch_dtype=torch.float16,
+    )
+
+    freeze_awq(lm.model, orig_model, awq_results, )
+
+
+
 
     if args.save_dir:
         # delete omni parameters

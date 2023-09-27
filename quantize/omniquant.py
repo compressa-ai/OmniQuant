@@ -10,6 +10,7 @@ import os
 import pdb
 
 
+from awq.quantize.pre_quant import apply_awq, freeze_awq
 
 
 
@@ -21,6 +22,8 @@ def omniquant(
     act_scales,
     act_shifts,
     logger=None,
+    awq_results=None,
+    orig_model=None
 ):
     logger.info("Starting ...")
     
@@ -32,6 +35,10 @@ def omniquant(
     is_llama = False
     if 'llama' in args.model or 'Llama' in args.model:
         is_llama = True
+
+        if orig_model is not None:
+            orig_layers = orig_model.model.layers
+
         layers = model.model.layers
         model.model.embed_tokens = model.model.embed_tokens.to(dev)
         model.model.norm = model.model.norm.to(dev)
@@ -178,7 +185,7 @@ def omniquant(
                                 
         if args.resume:
             qlayer.load_state_dict(omni_parameters[i], strict=False)
-        
+
         if args.epochs > 0:
             with torch.no_grad():
                 qlayer.float()      # required for AMP training
@@ -208,6 +215,8 @@ def omniquant(
                     norm = loss_scaler(loss, optimizer,parameters=qlayer.omni_parameters(use_shift))
                     norm_list.append(norm.data)
 
+                    # freeze_awq(qlayer, orig_layers[i], awq_results, args.freeze_frac)
+
                 loss_mean = torch.stack(loss_list).mean()
                 norm_mean = torch.stack(norm_list).mean()
                 logger.info(f"layer {i} iter {epochs} loss:{loss_mean} norm:{norm_mean} max memory_allocated {torch.cuda.max_memory_allocated(lm._device) / 1024**2} ")
@@ -215,7 +224,11 @@ def omniquant(
             del optimizer
 
         # real smooth and quantization
-        qlayer.smooth_and_quant_inplace()
+        qlayer.smooth_and_quant_inplace(
+            awq_results,
+            freeze_frac=args.freeze_frac,
+            name_prefix=f'{layer_name_prefix}.{i}'
+        )
         if args.epochs>0:
             # update input of quantization model
             with torch.no_grad():

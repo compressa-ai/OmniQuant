@@ -214,6 +214,8 @@ def main():
     parser.add_argument("--multigpu", action="store_true", help="at eval, map model to multiple gpus")
     parser.add_argument('--load_awq', type=str, default=None,
                         help="load the awq search results")
+    parser.add_argument('--freeze_frac', type=float, default=0,
+                        help="weight freeze frac")
 
     args = parser.parse_args()
     random.seed(args.seed)
@@ -247,7 +249,7 @@ def main():
         print('Loading awq...')
 
         awq_results = torch.load(args.load_awq, map_location="cuda")
-        apply_awq(lm.model, awq_results)
+        # apply_awq(lm.model, awq_results)
 
         # Debug
         # freeze_awq(lm.model, lm.model, awq_results, )
@@ -326,6 +328,16 @@ def main():
         act_scales = torch.load(f'./act_scales/{args.net}.pt')
         act_shifts = torch.load(f'./act_shifts/{args.net}.pt')
 
+
+    # print('Loading model for freeze...')
+    # from models.LMClass import AutoModelForCausalLM, AutoConfig
+    #
+    # config = AutoConfig.from_pretrained(args.model)
+    # orig_model = AutoModelForCausalLM.from_pretrained(
+    #     args.model, config=config,
+    #     device_map='cpu', torch_dtype=torch.float16,
+    # )
+
     omniquant(
         lm,
         args,
@@ -333,22 +345,24 @@ def main():
         act_scales,
         act_shifts,
         logger,
+        awq_results,
+        # orig_model,
     )
 
     logger.info(time.time() - tick)
 
 
 
-    print('Freezing awq...')
-    from models.LMClass import AutoModelForCausalLM, AutoConfig
-
-    config = AutoConfig.from_pretrained(args.model)
-    orig_model = AutoModelForCausalLM.from_pretrained(
-        args.model, config=config,
-        device_map='cpu', torch_dtype=torch.float16,
-    )
-
-    freeze_awq(lm.model, orig_model, awq_results, )
+    # print('Freezing awq...')
+    # from models.LMClass import AutoModelForCausalLM, AutoConfig
+    #
+    # config = AutoConfig.from_pretrained(args.model)
+    # orig_model = AutoModelForCausalLM.from_pretrained(
+    #     args.model, config=config,
+    #     device_map='cpu', torch_dtype=torch.float16,
+    # )
+    #
+    # freeze_awq(lm.model, orig_model, awq_results, args.freeze_frac)
 
 
 

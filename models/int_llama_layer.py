@@ -317,7 +317,8 @@ class QuantLlamaDecoderLayer(nn.Module):
                 del module.temp_bias
 
     @torch.no_grad()
-    def smooth_and_quant_inplace(self):
+    def smooth_and_quant_inplace(
+            self, awq_results=None, freeze_frac=None, name_prefix=None):
         if self.let:
             for name, module in self.named_parameters():
                 if "smooth_scale" in name:
@@ -330,9 +331,62 @@ class QuantLlamaDecoderLayer(nn.Module):
                                 self.out_smooth_scale, self.out_smooth_shift)
             smooth_q_k_inplace(self.self_attn.q_proj, self.self_attn.k_proj,
                                 self.qkt_smooth_scale)
+
+
         for name, module in self.named_modules():
+            fullname = f'{name_prefix}.{name}'
+
             if isinstance(module, QuantLinear):
-                module.weight = module.weight_quantizer(module.weight)
+                scales_list = awq_results['scale']
+
+                if awq_results is not None:
+                    from awq.utils.module import get_op_by_name, get_op_name, set_op_by_name
+
+                    scales = None
+                    prev_op_name = None
+
+                    for prev_op_name, layer_names, _scales in scales_list:
+                        # print(f'Name: {fullname}')
+                        # print(f'Prev op name: {prev_op_name}')
+                        # print(f'Layer names: {layer_names}')
+
+                        if fullname in layer_names:
+                            scales = _scales
+                            # print(f'!!! Found scales for module "{fullname}"')
+
+                    assert scales is not None
+
+                quantized_weight = module.weight_quantizer(module.weight)
+
+                if awq_results is None:
+                    module.weight = quantized_weight
+                else:
+                    p = freeze_frac
+
+                    inds = torch.argsort(scales)
+                    num_inds_to_restore = int(len(scales) * p)
+                    num_inds_to_skip = len(scales) - num_inds_to_restore
+                    inds_to_restore = inds[num_inds_to_skip:]
+                    inds_to_skip = inds[:num_inds_to_skip]
+
+                    assert len(inds_to_skip) + len(inds_to_restore) == len(scales)
+                    assert torch.argmax(scales) in inds_to_restore
+
+                    print(f'!!! Num inds: {len(inds)}. Num inds to restore: {num_inds_to_restore}.')
+                    scales[inds_to_restore] = 1.0
+                    scales[inds_to_skip] = 0.0
+
+                    assert torch.sum(
+                        scales) == num_inds_to_restore, f'{sum(scales)} {num_inds_to_restore} {len(inds_to_restore)} {len(scales)}'
+
+                    if 'layer' in prev_op_name.lower() and 'norm' in prev_op_name.lower():
+                        scales = scales.view(-1, 1)
+
+                    module.weight = (
+                        quantized_weight * (1 - scales)
+                        + module.weight * scales
+                    )
+
                 module.use_temporary_parameter=False
 
     def let_parameters(self, use_shift=True):

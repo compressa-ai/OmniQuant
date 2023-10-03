@@ -158,8 +158,82 @@ def omniquant(
         # if is_llama and args.abits == 16:
         #     use_shift = False                   # deactivate channel-wise shifting for llama weight-
         # use_shift = True if args.abits < 16 else False   # only activate per-channel shifting when weight-activation quantization
-        
+
+
+
+        if args.let and args.n_grid is not None:
+            logger.info(
+                f"layer {i} searching for best ratio (n_grid={args.n_grid})...")
+
+            best_error = float('inf')
+            best_ratio = -1
+
+            n_grid = args.n_grid
+
+            for r in range(n_grid):
+                ratio = r / n_grid
+
+                # init channel-wise scaling and shift
+                qlayer.register_parameter("qkt_smooth_scale", torch.nn.Parameter(
+                    torch.ones(layer.self_attn.q_proj.out_features, device=dev, dtype=dtype)))
+
+                # TODO: послойно искать alpha
+                for name, module in qlayer.named_modules():
+                    if isinstance(module, QuantLinear):
+                        for key in pairs.keys():
+                            if key in name:
+                                act = act_scales[f'{layer_name_prefix}.{i}.{name}'].to(device=dev, dtype=dtype).clamp(
+                                    min=1e-5)
+                                weight = module.weight.max(dim=0)[0].clamp(min=1e-5)
+                                scale = (act.pow(ratio) / weight.pow(1 - ratio)).clamp(min=1e-5)
+                                if use_shift and not is_llama:
+                                    shift = act_shifts[f'{layer_name_prefix}.{i}.{name}'].to(device=dev, dtype=dtype)
+                                else:
+                                    shift = torch.zeros_like(scale)
+                                qlayer.register_parameter(f"{pairs[key]}_smooth_shift", torch.nn.Parameter(shift))
+                                qlayer.register_parameter(f"{pairs[key]}_smooth_scale", torch.nn.Parameter(scale))
+
+                with torch.no_grad():
+                    qlayer.float()  # required for AMP training
+
+                loss_list = []
+
+                for j in range(args.nsamples // args.batch_size):
+                    index = j * args.batch_size
+                    # obtain output of quantization model
+                    with torch.cuda.amp.autocast():
+                        qlayer.smooth_and_quant_temporary()
+                        quant_out = \
+                        qlayer(quant_inps[index:index + args.batch_size, ], attention_mask=attention_mask_batch,
+                               position_ids=position_ids)[0]
+                        loss = loss_func(fp_inps[index:index + args.batch_size, ], quant_out)
+                        if args.aug_loss:
+                            loss += loss_func(fp_inps_2[index:index + args.batch_size, ], quant_out)
+
+                    if not math.isfinite(loss.item()):
+                        logger.info(f"Loss is NAN! alpha = {ratio}.")
+
+                    loss_list.append(loss.data)
+                    is_best = loss < best_error
+
+                    if is_best:
+                        best_error = loss
+                        best_ratio = ratio
+
+                logger.info(
+                    f"layer {i} best_ratio:{best_ratio} best_error:{best_error} errors:{loss_list}.")
+                qlayer.clear_temp_variable()
+
+
+
+
         if args.let:
+            if args.n_grid is None:
+                best_ratio = args.alpha
+
+            logger.info(
+                f"layer {i} using alpha {best_ratio} for LET.")
+
             # init channel-wise scaling and shift
             qlayer.register_parameter("qkt_smooth_scale",torch.nn.Parameter(torch.ones(layer.self_attn.q_proj.out_features,device=dev, dtype=dtype)))
             for name,module in qlayer.named_modules():
@@ -168,14 +242,14 @@ def omniquant(
                         if key in name:
                             act = act_scales[f'{layer_name_prefix}.{i}.{name}'].to(device=dev, dtype=dtype).clamp(min=1e-5)
                             weight = module.weight.max(dim=0)[0].clamp(min=1e-5)
-                            scale = (act.pow(args.alpha)/weight.pow(1-args.alpha)).clamp(min=1e-5)
+                            scale = (act.pow(best_ratio)/weight.pow(1-best_ratio)).clamp(min=1e-5)
                             if use_shift and not is_llama:
                                 shift = act_shifts[f'{layer_name_prefix}.{i}.{name}'].to(device=dev, dtype=dtype)
                             else:
                                 shift = torch.zeros_like(scale)
                             qlayer.register_parameter(f"{pairs[key]}_smooth_shift",torch.nn.Parameter(shift))
                             qlayer.register_parameter(f"{pairs[key]}_smooth_scale",torch.nn.Parameter(scale))
-                                
+
         if args.resume:
             qlayer.load_state_dict(omni_parameters[i], strict=False)
         
@@ -213,6 +287,11 @@ def omniquant(
                 logger.info(f"layer {i} iter {epochs} loss:{loss_mean} norm:{norm_mean} max memory_allocated {torch.cuda.max_memory_allocated(lm._device) / 1024**2} ")
             qlayer.clear_temp_variable()
             del optimizer
+
+
+
+
+
 
         # real smooth and quantization
         qlayer.smooth_and_quant_inplace()

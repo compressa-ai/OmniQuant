@@ -195,6 +195,7 @@ def main():
     parser.add_argument("--abits", type=int, default=4)
     parser.add_argument("--group_size", type=int, default=None)
     parser.add_argument("--alpha", type=float, default=0.5)
+    parser.add_argument("--n_grid", type=int, default=20)
     parser.add_argument("--let_lr", type=float, default=5e-3)
     parser.add_argument("--lwc_lr", type=float, default=1e-2)
     parser.add_argument("--wd", type=float, default=0)

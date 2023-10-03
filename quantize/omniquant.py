@@ -167,6 +167,7 @@ def omniquant(
 
             best_error = float('inf')
             best_ratio = -1
+            error_list = []
 
             n_grid = args.n_grid
 
@@ -196,15 +197,12 @@ def omniquant(
                 with torch.no_grad():
                     qlayer.float()  # required for AMP training
 
-                loss_list = []
-
                 for j in range(args.nsamples // args.batch_size):
                     index = j * args.batch_size
                     # obtain output of quantization model
                     with torch.cuda.amp.autocast():
                         qlayer.smooth_and_quant_temporary()
-                        quant_out = \
-                        qlayer(quant_inps[index:index + args.batch_size, ], attention_mask=attention_mask_batch,
+                        quant_out = qlayer(quant_inps[index:index + args.batch_size, ], attention_mask=attention_mask_batch,
                                position_ids=position_ids)[0]
                         loss = loss_func(fp_inps[index:index + args.batch_size, ], quant_out)
                         if args.aug_loss:
@@ -213,19 +211,19 @@ def omniquant(
                     if not math.isfinite(loss.item()):
                         logger.info(f"Loss is NAN! alpha = {ratio}.")
 
-                    loss_list.append(loss.data)
-                    is_best = loss < best_error
+                error_list.append(loss.data)
+                is_best = loss < best_error
 
-                    if is_best:
-                        best_error = loss
-                        best_ratio = ratio
+                if is_best:
+                    best_error = loss
+                    best_ratio = ratio
 
-                logger.info(
-                    f"layer {i} best_ratio:{best_ratio} best_error:{best_error} errors:{loss_list}.")
+                    logger.info(
+                        f"layer {i} current best_ratio:{best_ratio} best_error:{best_error} errors:{[float(v) for v in error_list]}.")
                 qlayer.clear_temp_variable()
 
-
-
+            logger.info(
+                f"layer {i} final best_ratio:{best_ratio} best_error:{best_error} errors:{[float(v) for v in error_list]}.")
 
         if args.let:
             if args.n_grid is None:

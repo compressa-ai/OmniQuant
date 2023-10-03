@@ -22,15 +22,15 @@ def truncate_number(number, threshold=1e-2):
 
 
 def smooth_ln_fcs_temporary(ln, fcs, scales,shifts):
-    ln.use_temporary_parameter = True
+    # ln.use_temporary_parameter = True
     if not isinstance(fcs, list):
         fcs = [fcs]
-    if hasattr(ln, 'bias') and ln.bias is not None:
-        ln.temp_bias = (ln.bias - shifts) / scales
-    else:
-        ln.temp_bias = (-1*shifts)/ scales
-
-    ln.temp_weight = ln.weight / scales
+    # if hasattr(ln, 'bias') and ln.bias is not None:
+    #     ln.temp_bias = (ln.bias - shifts) / scales
+    # else:
+    #     ln.temp_bias = (-1*shifts)/ scales
+    #
+    # ln.temp_weight = ln.weight / scales
 
     for fc in fcs:
         fc.use_temporary_parameter = True
@@ -43,15 +43,15 @@ def smooth_ln_fcs_temporary(ln, fcs, scales,shifts):
 
 def smooth_fc_fc_temporary(fc1, fc2, scales,shifts=None):
     # only support for v_proj and out_proh now.
-    fc1.use_temporary_parameter = True
+    # fc1.use_temporary_parameter = True
     fc2.use_temporary_parameter = True
-    if hasattr(fc1, 'temp_weight'):
-        fc1.temp_bias = fc1.temp_bias - shifts
-        fc1.temp_bias = fc1.temp_bias/scales.view(-1)
-        fc1.temp_weight = fc1.temp_weight/scales.view(-1,1)
-    else:
-        fc1.temp_bias = fc1.bias/scales.view(-1)
-        fc1.temp_weight = fc1.weight/scales.view(-1,1)
+    # if hasattr(fc1, 'temp_weight'):
+    #     fc1.temp_bias = fc1.temp_bias - shifts
+    #     fc1.temp_bias = fc1.temp_bias/scales.view(-1)
+    #     fc1.temp_weight = fc1.temp_weight/scales.view(-1,1)
+    # else:
+    #     fc1.temp_bias = fc1.bias/scales.view(-1)
+    #     fc1.temp_weight = fc1.weight/scales.view(-1,1)
     
     if hasattr(fc2, 'bias') and fc2.bias is not None:
         fc2.temp_bias = fc2.bias + fc2.weight@shifts
@@ -61,25 +61,25 @@ def smooth_fc_fc_temporary(fc1, fc2, scales,shifts=None):
 
 
 def smooth_q_k_temporary(q_proj, k_proj, scales):
-    q_proj.use_temporary_parameter = True
+    # q_proj.use_temporary_parameter = True
     k_proj.use_temporary_parameter = True
-    q_proj.temp_weight = q_proj.temp_weight/scales.view(-1,1)
-    q_proj.temp_bias = q_proj.temp_bias/scales.view(-1)
+    # q_proj.temp_weight = q_proj.temp_weight/scales.view(-1,1)
+    # q_proj.temp_bias = q_proj.temp_bias/scales.view(-1)
     k_proj.temp_weight = k_proj.temp_weight*scales.view(-1,1)
     k_proj.temp_bias = k_proj.temp_bias*scales.view(-1)
 
 def smooth_ln_fcs_inplace(ln, fcs, scales,shifts):
-    ln.use_temporary_parameter = False
+    # ln.use_temporary_parameter = False
     if not isinstance(fcs, list):
         fcs = [fcs]
-    if hasattr(ln, 'bias') and ln.bias is not None:
-        ln.bias.sub_(shifts)
-        ln.bias.div_(scales)
-    else:
-        del ln.bias
-        ln.register_buffer('bias',(-1*shifts)/scales)
+    # if hasattr(ln, 'bias') and ln.bias is not None:
+    #     ln.bias.sub_(shifts)
+    #     ln.bias.div_(scales)
+    # else:
+    #     del ln.bias
+    #     ln.register_buffer('bias',(-1*shifts)/scales)
 
-    ln.weight.div_(scales)
+    # ln.weight.div_(scales)
     for fc in fcs:
         fc.use_temporary_parameter = False
         if hasattr(fc, 'bias') and fc.bias is not None:
@@ -92,11 +92,11 @@ def smooth_ln_fcs_inplace(ln, fcs, scales,shifts):
 
 def smooth_fc_fc_inplace(fc1, fc2, scales,shifts=None):
     # only support for v_proj and out_proh now.
-    fc1.use_temporary_parameter = False
+    # fc1.use_temporary_parameter = False
     fc2.use_temporary_parameter = False
-    fc1.bias.sub_(shifts)
-    fc1.bias.div_(scales.view(-1))
-    fc1.weight.div_(scales.view(-1,1))
+    # fc1.bias.sub_(shifts)
+    # fc1.bias.div_(scales.view(-1))
+    # fc1.weight.div_(scales.view(-1,1))
     
     if hasattr(fc2, 'bias') and fc2.bias is not None:
         fc2.bias.add_(fc2.weight@shifts)
@@ -106,9 +106,9 @@ def smooth_fc_fc_inplace(fc1, fc2, scales,shifts=None):
     fc2.weight.mul_(scales.view(1,-1))
 
 def smooth_q_k_inplace(q_proj, k_proj, scales,):
-    q_proj.use_temporary_parameter = False
+    # q_proj.use_temporary_parameter = False
     k_proj.use_temporary_parameter = False
-    q_proj.weight.div_(scales.view(-1,1))
-    q_proj.bias.div_(scales.view(-1))
+    # q_proj.weight.div_(scales.view(-1,1))
+    # q_proj.bias.div_(scales.view(-1))
     k_proj.weight.mul_(scales.view(-1,1))
     k_proj.bias.mul_(scales.view(-1))

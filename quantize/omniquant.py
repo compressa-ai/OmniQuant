@@ -187,6 +187,7 @@ def omniquant(
                                     min=1e-5)
                                 weight = module.weight.max(dim=0)[0].clamp(min=1e-5)
                                 scale = (act.pow(ratio) / weight.pow(1 - ratio)).clamp(min=1e-5)
+                                scale = scale / (scale.max() * scale.min()).sqrt()
                                 if use_shift and not is_llama:
                                     shift = act_shifts[f'{layer_name_prefix}.{i}.{name}'].to(device=dev, dtype=dtype)
                                 else:
@@ -201,7 +202,7 @@ def omniquant(
                     index = j * args.batch_size
                     # obtain output of quantization model
                     with torch.cuda.amp.autocast():
-                        qlayer.smooth_and_quant_temporary()
+                        qlayer.kinda_smooth_and_quant_temporary()
                         quant_out = qlayer(quant_inps[index:index + args.batch_size, ], attention_mask=attention_mask_batch,
                                position_ids=position_ids)[0]
                         loss = loss_func(fp_inps[index:index + args.batch_size, ], quant_out)
@@ -241,6 +242,7 @@ def omniquant(
                             act = act_scales[f'{layer_name_prefix}.{i}.{name}'].to(device=dev, dtype=dtype).clamp(min=1e-5)
                             weight = module.weight.max(dim=0)[0].clamp(min=1e-5)
                             scale = (act.pow(best_ratio)/weight.pow(1-best_ratio)).clamp(min=1e-5)
+                            scale = scale / (scale.max() * scale.min()).sqrt()
                             if use_shift and not is_llama:
                                 shift = act_shifts[f'{layer_name_prefix}.{i}.{name}'].to(device=dev, dtype=dtype)
                             else:

@@ -310,6 +310,42 @@ class QuantLlamaDecoderLayer(nn.Module):
                     module.temp_bias = module.bias
                 module.use_temporary_parameter=True
 
+    def kinda_smooth_and_quant_temporary(self):
+        if self.let:
+            kinda_smooth_ln_fcs_temporary(self.input_layernorm,[self.self_attn.q_proj, self.self_attn.k_proj, self.self_attn.v_proj],
+                                    self.qkv_smooth_scale,self.qkv_smooth_shift)
+            kinda_smooth_ln_fcs_temporary(self.post_attention_layernorm,[self.mlp.up_proj,self.mlp.gate_proj],
+                                    self.fc1_smooth_scale,self.fc1_smooth_shift)
+            kinda_smooth_fc_fc_temporary(self.self_attn.v_proj,self.self_attn.o_proj,
+                                self.out_smooth_scale, self.out_smooth_shift)
+            kinda_smooth_q_k_temporary(self.self_attn.q_proj, self.self_attn.k_proj,
+                                self.qkt_smooth_scale)
+            self.mlp.down_proj.temp_weight = self.mlp.down_proj.weight
+        else:
+            for name, module in self.named_modules():
+                if isinstance(module, QuantLinear):
+                    module.temp_weight = module.weight
+        # quant
+        for name, module in self.named_modules():
+            if isinstance(module, QuantLinear):
+                if hasattr(module, "temp_weight"):
+                    module.temp_weight = module.weight_quantizer(module.temp_weight)
+                else:
+                    module.temp_weight = module.weight_quantizer(module.weight)
+                if not hasattr(module, "temp_bias"):
+                    module.temp_bias = module.bias
+                module.use_temporary_parameter=True
+
+        if self.let:
+            kinda_unsmooth_ln_fcs_temporary(self.input_layernorm,[self.self_attn.q_proj, self.self_attn.k_proj, self.self_attn.v_proj],
+                                    self.qkv_smooth_scale,self.qkv_smooth_shift)
+            kinda_unsmooth_ln_fcs_temporary(self.post_attention_layernorm,[self.mlp.up_proj,self.mlp.gate_proj],
+                                    self.fc1_smooth_scale,self.fc1_smooth_shift)
+            kinda_unsmooth_fc_fc_temporary(self.self_attn.v_proj,self.self_attn.o_proj,
+                                self.out_smooth_scale, self.out_smooth_shift)
+            kinda_unsmooth_q_k_temporary(self.self_attn.q_proj, self.self_attn.k_proj,
+                                self.qkt_smooth_scale)
+
     def clear_temp_variable(self):
        for name, module in self.named_modules():
             if isinstance(module, QuantLinear):

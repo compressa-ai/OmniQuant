@@ -187,8 +187,8 @@ def omniquant(
             let_params = qlayer.let_parameters(use_shift)
             lwc_params = qlayer.lwc_parameters()
 
-            print(f'!!! Optimizer LET params: {let_params}.')
-            print(f'!!! optimizer LWC params: {lwc_params}.')
+            # print(f'!!! Optimizer LET params: {list(qlayer.let_parameters(use_shift))}.')
+            # print(f'!!! Optimizer LWC params: {list(qlayer.lwc_parameters())}.')
 
             optimizer = torch.optim.AdamW(
                 [{'params':let_params,'lr':args.let_lr},

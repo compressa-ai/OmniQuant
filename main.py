@@ -312,10 +312,13 @@ def main():
 
     logger.info(time.time() - tick)
 
-    if args.save_dir:
+    if True:  #args.save_dir:
         # delete omni parameters
         for name, module in lm.model.named_modules():
             if isinstance(module, QuantLinear):
+                del module.weight_quantizer.alpha
+                del module.weight_quantizer.scale
+                del module.weight_quantizer.zero_point
                 del module.weight_quantizer.lowbound_factor
                 del module.weight_quantizer.upbound_factor
             if isinstance(module,QuantLlamaDecoderLayer) or isinstance(module,QuantOPTDecoderLayer):
@@ -326,8 +329,8 @@ def main():
                     del module.out_smooth_shift
                     del module.fc1_smooth_scale
                     del module.fc1_smooth_shift           
-        lm.model.save_pretrained(args.save_dir)  
-        lm.tokenizer.save_pretrained(args.save_dir) 
+        # lm.model.save_pretrained(args.save_dir)
+        # lm.tokenizer.save_pretrained(args.save_dir)
     evaluate(lm, args,logger)
 
 

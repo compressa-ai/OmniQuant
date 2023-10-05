@@ -337,17 +337,23 @@ class QuantLlamaDecoderLayer(nn.Module):
 
     def let_parameters(self, use_shift=True):
         params = []
+        names = []
         template = "smooth" if use_shift else "smooth_scale"
         for n, m in self.named_parameters():
             if n.find(template) > -1:
                 params.append(m)
+                names.append(n)
+        print(f'!!! LET params: {names}.')
         return iter(params)  
 
     def lwc_parameters(self):
         params = []
+        names = []
         for n, m in self.named_parameters():
             if n.find('bound_factor') > -1 or n.find('alpha') > -1:
                 params.append(m)
+                names.append(n)
+        print(f'!!! LWC params: {names}.')
         return iter(params)  
 
     def omni_parameters(self, use_shift=True):

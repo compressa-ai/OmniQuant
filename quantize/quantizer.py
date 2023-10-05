@@ -85,18 +85,27 @@ class UniformAffineQuantizer(nn.Module):
         # self.register_buffer('zero_point', torch.tensor([0], dtype=torch.int))
         self.gamma, self.zeta = -0.1, 1.1
         self.round_mode = 'learned_hard_sigmoid'
-        self.alpha = torch.nn.Parameter(torch.ones(*shape).cuda())
+
+        if shape is not None:
+            print('Have alpha!')
+            self.alpha = torch.nn.Parameter(torch.ones(*shape).cuda())
+        else:
+            print('No alpha!')
+            self.alpha = None
+
         self.num_iters = torch.nn.Parameter(
-            torch.tensor([0], requires_grad=False)
+            torch.tensor([0]), requires_grad=False
         )
 
-    def init_alpha(self, x: torch.Tensor):
-        if self.ch_axis != -1:
-            new_shape = [1] * len(x.shape)
-            new_shape[self.ch_axis] = x.shape[self.ch_axis]
-            scale = self.scale.data.reshape(new_shape)
-        else:
-            scale = self.scale.data
+    def init_alpha(self, x: torch.Tensor, scale, zero_point):
+        # if self.ch_axis != -1:
+        #     new_shape = [1] * len(x.shape)
+        #     new_shape[self.ch_axis] = x.shape[self.ch_axis]
+        #     scale = scale.data.reshape(new_shape)
+        # else:
+        #     scale = scale.data
+        scale = scale.data
+
         x_floor = torch.floor(x / scale)
         if self.round_mode == 'learned_hard_sigmoid':
             rest = (x / scale) - x_floor  # rest of rounding [0, 1)
@@ -112,14 +121,23 @@ class UniformAffineQuantizer(nn.Module):
         return ((self.zeta - self.gamma) * torch.sigmoid(self.alpha) + self.gamma).clamp(0, 1)
 
     def adaround_forward(self, X, scale, zero_point, hard_value=False):
-        if self.ch_axis != -1:
-            new_shape = [1] * len(X.shape)
-            new_shape[self.ch_axis] = X.shape[self.ch_axis]
-            scale = scale.data.reshape(new_shape)
-            zero_point = zero_point.data.int().reshape(new_shape)
-        else:
-            scale = scale.item()
-            zero_point = zero_point.item()
+        if self.num_iters == 0:
+            # print(f'!!! INIT ALPHA')
+            self.init_alpha(X.data.clone().detach(), scale, zero_point)
+
+        # print(f'!!! ADAROUND')
+
+        # if self.ch_axis != -1:
+        #     new_shape = [1] * len(X.shape)
+        #     new_shape[self.ch_axis] = X.shape[self.ch_axis]
+        #     scale = scale.data.reshape(new_shape)
+        #     zero_point = zero_point.data.int().reshape(new_shape)
+        # else:
+        #     scale = scale.item()
+        #     zero_point = zero_point.item()
+        scale = scale.data
+        zero_point = zero_point.data
+
         X = torch.floor(X / scale)
         if hard_value:
             X += (self.alpha >= 0).float()
@@ -149,15 +167,17 @@ class UniformAffineQuantizer(nn.Module):
             dim1, dim2 = x.shape
             x = x.reshape(-1, self.group_size)
 
-        x_dequant = self.adaround_forward(x, scale, round_zero_point)
-        # x_int = round_ste(x / scale)
-        # if round_zero_point is not None:
-        #     x_int = x_int.add(round_zero_point)
-        # x_int = x_int.clamp(self.qmin, self.qmax)
-        # x_dequant = x_int
-        # if round_zero_point is not None:
-        #     x_dequant = x_dequant.sub(round_zero_point)
-        # x_dequant = x_dequant.mul(scale)
+        if self.alpha is not None:
+            x_dequant = self.adaround_forward(x, scale, round_zero_point)
+        else:
+            x_int = round_ste(x / scale)
+            if round_zero_point is not None:
+                x_int = x_int.add(round_zero_point)
+            x_int = x_int.clamp(self.qmin, self.qmax)
+            x_dequant = x_int
+            if round_zero_point is not None:
+                x_dequant = x_dequant.sub(round_zero_point)
+            x_dequant = x_dequant.mul(scale)
 
         if self.group_size:
             x_dequant = x_dequant.reshape(dim1, dim2)
@@ -167,9 +187,6 @@ class UniformAffineQuantizer(nn.Module):
     
 
     def forward(self, x: torch.Tensor):
-        if self.num_iters == 0:
-            self.init_alpha(x=x.data.clone().detach())
-
         if self.n_bits >= 16 or not self.enable:
             return x
         if self.metric == "fix0to1":

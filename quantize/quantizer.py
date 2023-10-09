@@ -140,12 +140,21 @@ class UniformAffineQuantizer(nn.Module):
 
         X = torch.floor(X / scale)
         if hard_value:
+            print('!!! Hard AdaRound !!!')
             X += (self.alpha >= 0).float()
         else:
             X += self.rectified_sigmoid()
         X += zero_point
         X = torch.clamp(X, self.qmin, self.qmax)
         X = (X - zero_point) * scale
+
+
+        # data = data / alpha
+        # data_c = data.clamp(0, 1)
+        # data_q = data_c.mul(2 ** num_bits - 1).round().div(2 ** num_bits - 1)
+        # data_q = (data_q - data_c).detach() + data_c
+        # data_q = data_q * alpha
+
         return X
 
     # def get_hard_value(self, X):
@@ -157,7 +166,7 @@ class UniformAffineQuantizer(nn.Module):
         self.qmin = 0
         self.qmax = 2 ** (n_bits) - 1
 
-    def fake_quant(self, x, scale, round_zero_point):
+    def fake_quant(self, x, scale, round_zero_point, hard):
         if self.deficiency > 0:
             pad_zeros = torch.zeros((x.shape[0],self.deficiency),dtype=x.dtype,device=x.device)
             x = torch.cat((x,pad_zeros),dim=1)
@@ -168,7 +177,9 @@ class UniformAffineQuantizer(nn.Module):
             x = x.reshape(-1, self.group_size)
 
         if self.alpha is not None:
-            x_dequant = self.adaround_forward(x, scale, round_zero_point)
+            x_dequant = self.adaround_forward(
+                x, scale, round_zero_point, hard_value=hard
+            )
         else:
             x_int = round_ste(x / scale)
             if round_zero_point is not None:
@@ -186,7 +197,7 @@ class UniformAffineQuantizer(nn.Module):
         return x_dequant
     
 
-    def forward(self, x: torch.Tensor):
+    def forward(self, x: torch.Tensor, hard=False):
         if self.n_bits >= 16 or not self.enable:
             return x
         if self.metric == "fix0to1":
@@ -197,7 +208,9 @@ class UniformAffineQuantizer(nn.Module):
         else:
             raise NotImplementedError()   
 
-        x_dequant = self.fake_quant(x, self.scale, self.round_zero_point)
+        x_dequant = self.fake_quant(
+            x, self.scale, self.round_zero_point, hard
+        )
         self.num_iters += 1
 
         return x_dequant

@@ -203,7 +203,7 @@ def omniquant(
                     index = j * args.batch_size
                     # obtain output of quantization model
                     with torch.cuda.amp.autocast():
-                        qlayer.smooth_and_quant_temporary()
+                        qlayer.smooth_and_quant_temporary(iter=epochs)
                         quant_out = qlayer(quant_inps[index:index+args.batch_size,], attention_mask=attention_mask_batch,position_ids=position_ids)[0]
                         loss = loss_func(fp_inps[index:index+args.batch_size,], quant_out)
                         if args.aug_loss:

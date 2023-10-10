@@ -166,7 +166,9 @@ class UniformAffineQuantizer(nn.Module):
         self.qmin = 0
         self.qmax = 2 ** (n_bits) - 1
 
-    def fake_quant(self, x, scale, round_zero_point, hard):
+    def fake_quant(self, x, scale, round_zero_point, hard, iter):
+        # print(f'!!! {self.num_iters}')
+
         if self.deficiency > 0:
             pad_zeros = torch.zeros((x.shape[0],self.deficiency),dtype=x.dtype,device=x.device)
             x = torch.cat((x,pad_zeros),dim=1)
@@ -176,10 +178,23 @@ class UniformAffineQuantizer(nn.Module):
             dim1, dim2 = x.shape
             x = x.reshape(-1, self.group_size)
 
-        if self.alpha is not None:
+        if self.alpha is not None and iter is not None and iter < 7:  # self.num_iters <= 128 * 8:
             x_dequant = self.adaround_forward(
-                x, scale, round_zero_point, hard_value=hard
+                x, scale, round_zero_point, hard_value=False
             )
+        elif self.alpha is not None:
+            # print('!!! ada stop')
+            x = self.adaround_forward(
+                x, scale, round_zero_point, hard_value=False
+            )
+            x_int = round_ste(x / scale)
+            if round_zero_point is not None:
+                x_int = x_int.add(round_zero_point)
+            x_int = x_int.clamp(self.qmin, self.qmax)
+            x_dequant = x_int
+            if round_zero_point is not None:
+                x_dequant = x_dequant.sub(round_zero_point)
+            x_dequant = x_dequant.mul(scale)
         else:
             x_int = round_ste(x / scale)
             if round_zero_point is not None:
@@ -194,10 +209,13 @@ class UniformAffineQuantizer(nn.Module):
             x_dequant = x_dequant.reshape(dim1, dim2)
         if self.deficiency > 0:
             x_dequant = x_dequant[:,:-self.deficiency]
+
+        self.num_iters += 1
+
         return x_dequant
     
 
-    def forward(self, x: torch.Tensor, hard=False):
+    def forward(self, x: torch.Tensor, hard=False, iter=None):
         if self.n_bits >= 16 or not self.enable:
             return x
         if self.metric == "fix0to1":
@@ -209,9 +227,8 @@ class UniformAffineQuantizer(nn.Module):
             raise NotImplementedError()   
 
         x_dequant = self.fake_quant(
-            x, self.scale, self.round_zero_point, hard
+            x, self.scale, self.round_zero_point, hard, iter
         )
-        self.num_iters += 1
 
         return x_dequant
 
@@ -230,6 +247,7 @@ class UniformAffineQuantizer(nn.Module):
             xmax = self.sigmoid(self.upbound_factor)*xmax
             xmin = self.sigmoid(self.lowbound_factor)*xmin
         if self.symmetric:
+            assert False
             abs_max = torch.max(xmax.abs(),xmin.abs())
             scale = abs_max / (2**(self.n_bits-1)-1)
             self.scale = scale.clamp(min=CLIPMIN, max=1e4)

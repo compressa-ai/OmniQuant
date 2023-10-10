@@ -89,6 +89,8 @@ class UniformAffineQuantizer(nn.Module):
         if shape is not None:
             print('Have alpha!')
             self.alpha = torch.nn.Parameter(torch.ones(*shape).cuda())
+            self.alpha_scale = torch.nn.Parameter(torch.ones(*shape).cuda())
+            self.alpha_zero_point = torch.nn.Parameter(torch.ones(*shape).cuda())
         else:
             print('No alpha!')
             self.alpha = None
@@ -112,6 +114,8 @@ class UniformAffineQuantizer(nn.Module):
             alpha = -torch.log((self.zeta - self.gamma) / (rest - self.gamma) - 1)  # => sigmoid(alpha) = rest
             with torch.no_grad():
                 self.alpha.data = alpha
+                self.alpha_scale.data = scale
+                self.alpha_zero_point.data = zero_point
         else:
             raise NotImplementedError
 
@@ -135,8 +139,8 @@ class UniformAffineQuantizer(nn.Module):
         # else:
         #     scale = scale.item()
         #     zero_point = zero_point.item()
-        scale = scale.data
-        zero_point = zero_point.data
+        scale = self.alpha_scale
+        zero_point = self.alpha_zero_point
 
         X = torch.floor(X / scale)
         if hard_value:
@@ -213,9 +217,11 @@ class UniformAffineQuantizer(nn.Module):
         reduce_shape = [-1]
         xmin = x.amin(reduce_shape, keepdim=True)
         xmax =  x.amax(reduce_shape, keepdim=True)
+
         if self.lwc:
             xmax = self.sigmoid(self.upbound_factor)*xmax
             xmin = self.sigmoid(self.lowbound_factor)*xmin
+
         if self.symmetric:
             abs_max = torch.max(xmax.abs(),xmin.abs())
             scale = abs_max / (2**(self.n_bits-1)-1)
@@ -226,6 +232,7 @@ class UniformAffineQuantizer(nn.Module):
             scale = range / (2**self.n_bits-1)
             self.scale = scale.clamp(min=CLIPMIN, max=1e4)
             zero_point = -(xmin) / (self.scale)
+
         self.round_zero_point = zero_point.clamp(min=-1e4, max=1e4).round()
 
 

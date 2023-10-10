@@ -332,7 +332,7 @@ class QuantLlamaDecoderLayer(nn.Module):
                                 self.qkt_smooth_scale)
         for name, module in self.named_modules():
             if isinstance(module, QuantLinear):
-                module.weight = module.weight_quantizer(module.weight)
+                module.weight = module.weight_quantizer(module.weight, hard=True)
                 module.use_temporary_parameter=False
 
     def let_parameters(self, use_shift=True):

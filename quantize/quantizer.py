@@ -89,9 +89,11 @@ class UniformAffineQuantizer(nn.Module):
         if shape is not None:
             print('Have alpha!')
             self.alpha = torch.nn.Parameter(torch.ones(*shape).cuda())
+            self.alpha_scale = torch.nn.Parameter(torch.ones(*shape).cuda())
         else:
             print('No alpha!')
             self.alpha = None
+            self.alpha_scale = None
 
         self.num_iters = torch.nn.Parameter(
             torch.tensor([0]), requires_grad=False
@@ -112,6 +114,7 @@ class UniformAffineQuantizer(nn.Module):
             alpha = -torch.log((self.zeta - self.gamma) / (rest - self.gamma) - 1)  # => sigmoid(alpha) = rest
             with torch.no_grad():
                 self.alpha.data = alpha
+                self.alpha_scale.data = scale * (2**self.n_bits-1)
         else:
             raise NotImplementedError
 
@@ -136,7 +139,16 @@ class UniformAffineQuantizer(nn.Module):
         #     scale = scale.item()
         #     zero_point = zero_point.item()
 
-        X = torch.floor(X / scale)
+        # print(f'!!! {self.alpha_scale.flatten()[:10]}')
+
+        self.alpha_scale.data.clamp_(min=CLIPMIN, max=1e4)
+
+        # assert all(v > 0 for v in self.alpha_scale.flatten()[:100])
+
+        scale = self.alpha_scale
+        zero_point = zero_point * self.scale / scale * (2**self.n_bits-1)
+
+        X = torch.floor(X / scale * (2**self.n_bits-1))
         if hard_value:
             print(f'!!! Hard AdaRound !!!')
             X += (self.alpha >= 0).float()
@@ -144,7 +156,8 @@ class UniformAffineQuantizer(nn.Module):
             X += self.rectified_sigmoid()
         X += zero_point
         X = torch.clamp(X, self.qmin, self.qmax)
-        X = (X - zero_point) * scale
+        X = (X - zero_point) * scale / (2**self.n_bits-1)
+
         return X
 
     # def get_hard_value(self, X):
@@ -218,6 +231,7 @@ class UniformAffineQuantizer(nn.Module):
         #     xmin = self.sigmoid(self.lowbound_factor)*xmin
 
         if self.symmetric:
+            assert False
             abs_max = torch.max(xmax.abs(),xmin.abs())
             scale = abs_max / (2**(self.n_bits-1)-1)
             self.scale = scale.clamp(min=CLIPMIN, max=1e4)
@@ -225,6 +239,9 @@ class UniformAffineQuantizer(nn.Module):
         else:
             range = xmax - xmin
             scale = range / (2**self.n_bits-1)
+
+            # assert all(v > 0 for v in scale.flatten()[:100])
+
             self.scale = scale.clamp(min=CLIPMIN, max=1e4)
             zero_point = -(xmin) / (self.scale)
 

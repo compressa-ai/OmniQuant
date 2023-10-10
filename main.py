@@ -317,6 +317,7 @@ def main():
         for name, module in lm.model.named_modules():
             if isinstance(module, QuantLinear):
                 del module.weight_quantizer.alpha
+                del module.weight_quantizer.alpha_scale
                 del module.weight_quantizer.scale
                 del module.weight_quantizer.zero_point
                 del module.weight_quantizer.lowbound_factor

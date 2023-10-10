@@ -118,7 +118,11 @@ class UniformAffineQuantizer(nn.Module):
     def rectified_sigmoid(self):
         """generate rounding mask.
         """
-        return ((self.zeta - self.gamma) * torch.sigmoid(self.alpha) + self.gamma).clamp(0, 1)
+        r = 4 * ((self.zeta - self.gamma) * torch.sigmoid(self.alpha) + self.gamma)
+        r = 4 * r - 2
+        r = r.clamp(-2, 2)
+
+        return r
 
     def adaround_forward(self, X, scale, zero_point, hard_value=False):
         if self.num_iters == 0:
@@ -138,12 +142,8 @@ class UniformAffineQuantizer(nn.Module):
         scale = scale.data
         zero_point = zero_point.data
 
-        X = torch.floor(X / scale)
-        if hard_value:
-            print('!!! Hard AdaRound !!!')
-            X += (self.alpha >= 0).float()
-        else:
-            X += self.rectified_sigmoid()
+        X += self.rectified_sigmoid()
+        X = round_ste(X / scale)
         X += zero_point
         X = torch.clamp(X, self.qmin, self.qmax)
         X = (X - zero_point) * scale

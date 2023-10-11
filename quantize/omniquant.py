@@ -133,13 +133,35 @@ def omniquant(
     else:
         omni_parameters = {}
 
-    
-    
+
+    # https://discuss.pytorch.org/t/how-do-i-check-the-number-of-parameters-of-a-model/4325/9
+    def count_parameters(model, non_trainable=False):
+        return sum(p.numel() for p in model.parameters() if non_trainable or p.requires_grad)
+
+    for i in range(len(layers)):
+        np_trainable = count_parameters(layers[i])
+        np_nontrainable = count_parameters(layers[i], non_trainable=True)
+
+        print(f'Layer {i} num params: {np_trainable} (trainable), {np_nontrainable} (all).')
+
+    if args.residuals is not None:
+        residuals = args.residuals.split(',')
+        residuals = [int(r) for r in residuals]
+    else:
+        residuals = []
+
     for i in range(len(layers)):
         logger.info(f"=== Start quantize layer {i} ===")
         layer = layers[i].to(dev)
-        qlayer = DecoderLayer(lm.model.config, layer, args)
 
+        if i in residuals:
+            quantize_residual = True
+        else:
+            quantize_residual = False
+
+        qlayer = DecoderLayer(
+            lm.model.config, layer, args, quantize_residual=quantize_residual
+        )
         
         # obtain output of full-precision model
         qlayer.set_quant_state(weight_quant=False, act_quant=False)

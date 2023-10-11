@@ -111,16 +111,25 @@ class UniformAffineQuantizer(nn.Module):
             rest = (x / scale) - x_floor  # rest of rounding [0, 1)
             alpha = -torch.log((self.zeta - self.gamma) / (rest - self.gamma) - 1)  # => sigmoid(alpha) = rest
             with torch.no_grad():
-                self.alpha.data = alpha
+                self.alpha.data = -4.6 * torch.ones_like().cuda(alpha)  #  alpha
         else:
             raise NotImplementedError
 
     def rectified_sigmoid(self):
         """generate rounding mask.
         """
-        r = 4 * ((self.zeta - self.gamma) * torch.sigmoid(self.alpha) + self.gamma)
-        r = 4 * r - 2
-        r = r.clamp(-2, 2)
+        # r = 4 * ((self.zeta - self.gamma) * torch.sigmoid(self.alpha) + self.gamma)
+        # r = 4 * r - 2
+        # r = r.clamp(-2, 2)
+
+        # r = ((self.zeta - self.gamma) * torch.sigmoid(self.alpha) + self.gamma)
+        # r = r.clamp(0, 1)
+
+        # r = 0 * self.alpha
+
+        r = ((self.zeta - self.gamma) * torch.sigmoid(self.alpha) + self.gamma)
+        r = 2 * r - 1
+        r = r.clamp(-0.01, 0.01)
 
         return r
 
@@ -139,11 +148,14 @@ class UniformAffineQuantizer(nn.Module):
         # else:
         #     scale = scale.item()
         #     zero_point = zero_point.item()
-        scale = scale.data
-        zero_point = zero_point.data
+        scale = scale
+        zero_point = zero_point
 
-        X += self.rectified_sigmoid()
-        X = round_ste(X / scale)
+        # X += self.rectified_sigmoid()
+        X = round_ste(
+            (X + X.detach().clone() * self.sigmoid(self.alpha)) / scale
+        )
+        # X = round_ste((X + self.alpha) / scale)
         X += zero_point
         X = torch.clamp(X, self.qmin, self.qmax)
         X = (X - zero_point) * scale

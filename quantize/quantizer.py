@@ -104,6 +104,7 @@ class UniformAffineQuantizer(nn.Module):
         x_dequant = x_dequant.mul(scale)
 
         if quantize_residual:
+            print(f'!!! Quantizing residual')
             x_diff = x_orig - x_dequant
 
             self.per_token_dynamic_calibration(x_diff)

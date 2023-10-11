@@ -138,6 +138,8 @@ def omniquant(
     def count_parameters(model, non_trainable=False):
         return sum(p.numel() for p in model.parameters() if non_trainable or p.requires_grad)
 
+    print(f'!!! Residuals: {args.residuals}')
+
     for i in range(len(layers)):
         np_trainable = count_parameters(layers[i])
         np_nontrainable = count_parameters(layers[i], non_trainable=True)

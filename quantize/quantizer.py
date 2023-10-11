@@ -112,7 +112,7 @@ class UniformAffineQuantizer(nn.Module):
             alpha = -torch.log((self.zeta - self.gamma) / (rest - self.gamma) - 1)  # => sigmoid(alpha) = rest
             with torch.no_grad():
                 # self.alpha.data = -4.6 * torch.ones_like(alpha).cuda()  #  alpha
-                self.alpha.data = 0.001 * torch.ones_like(alpha).cuda()  #  alpha
+                self.alpha.data = -2 * torch.ones_like(alpha).cuda()  #  alpha
         else:
             raise NotImplementedError
 
@@ -128,9 +128,10 @@ class UniformAffineQuantizer(nn.Module):
 
         # r = 0 * self.alpha
 
-        r = ((self.zeta - self.gamma) * torch.sigmoid(self.alpha) + self.gamma)
-        r = 2 * r - 1
-        r = r.clamp(-0.01, 0.01)
+        # r = ((self.zeta - self.gamma) * torch.sigmoid(self.alpha) + self.gamma)
+        r = torch.sigmoid(self.alpha)
+        r = 0.04 * r - 0.02
+        # r = r.clamp(-0.01, 0.01)
 
         return r
 
@@ -159,8 +160,11 @@ class UniformAffineQuantizer(nn.Module):
         # X = round_ste(
         #     (X + X.detach().clone() * self.sigmoid(self.alpha)) / scale
         # )
+        # X = round_ste(
+        #     (X + X.detach().clone() * self.alpha) / scale
+        # )
         X = round_ste(
-            (X + X.detach().clone() * self.alpha) / scale
+            (X + X.detach().clone() * self.rectified_sigmoid()) / scale
         )
         # X = round_ste((X + self.alpha) / scale)
         X += zero_point

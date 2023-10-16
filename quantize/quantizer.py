@@ -91,6 +91,11 @@ class UniformAffineQuantizer(nn.Module):
             dim1, dim2 = x.shape
             x = x.reshape(-1, self.group_size)
 
+        if quantize_residual and not hasattr(self, 'x_diff'):
+            self.register_buffer(
+                'x_diff', torch.zeros_like(x)
+            )
+
         if quantize_residual:
             x_orig = x
 
@@ -104,7 +109,7 @@ class UniformAffineQuantizer(nn.Module):
         x_dequant = x_dequant.mul(scale)
 
         if quantize_residual:
-            print(f'!!! Quantizing residual')
+            # print(f'!!! Quantizing residual')
             x_diff = x_orig - x_dequant
 
             self.per_token_dynamic_calibration(x_diff)
@@ -115,7 +120,9 @@ class UniformAffineQuantizer(nn.Module):
             x_diff_dequant = x_diff_dequant.sub(self.round_zero_point)
             x_diff_dequant = x_diff_dequant.mul(self.scale)
 
-            x_dequant = x_dequant + x_diff_dequant
+            self.x_diff = x_diff_dequant
+
+            x_dequant = x_dequant + self.x_diff
 
         if self.group_size:
             x_dequant = x_dequant.reshape(dim1, dim2)

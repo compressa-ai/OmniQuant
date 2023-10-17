@@ -81,7 +81,7 @@ class UniformAffineQuantizer(nn.Module):
         self.qmin = 0
         self.qmax = 2 ** (n_bits) - 1
 
-    def fake_quant(self, x, scale, round_zero_point, quantize_residual):
+    def fake_quant(self, x, scale, round_zero_point):
         if self.deficiency > 0:
             pad_zeros = torch.zeros((x.shape[0],self.deficiency),dtype=x.dtype,device=x.device)
             x = torch.cat((x,pad_zeros),dim=1)
@@ -90,14 +90,6 @@ class UniformAffineQuantizer(nn.Module):
             assert len(x.shape)==2, "only support linear layer now"
             dim1, dim2 = x.shape
             x = x.reshape(-1, self.group_size)
-
-        # if quantize_residual and not hasattr(self, 'x_diff'):
-        #     self.register_buffer(
-        #         'x_diff', torch.zeros_like(x)
-        #     )
-
-        if quantize_residual:
-            x_orig = x
 
         x_int = round_ste(x / scale)
         if round_zero_point is not None:
@@ -108,22 +100,6 @@ class UniformAffineQuantizer(nn.Module):
             x_dequant = x_dequant.sub(round_zero_point)
         x_dequant = x_dequant.mul(scale)
 
-        if quantize_residual:
-            # print(f'!!! Quantizing residual')
-            x_diff = x_orig - x_dequant
-
-            self.per_token_dynamic_calibration(x_diff)
-            x_diff_int = round_ste(x_diff / self.scale)
-            x_diff_int = x_diff_int.add(self.round_zero_point)
-            x_diff_int = x_diff_int.clamp(self.qmin, self.qmax)
-            x_diff_dequant = x_diff_int
-            x_diff_dequant = x_diff_dequant.sub(self.round_zero_point)
-            x_diff_dequant = x_diff_dequant.mul(self.scale)
-
-            # self.x_diff = x_diff_dequant
-
-            x_dequant = x_dequant + x_diff_dequant
-
         if self.group_size:
             x_dequant = x_dequant.reshape(dim1, dim2)
         if self.deficiency > 0:
@@ -131,12 +107,14 @@ class UniformAffineQuantizer(nn.Module):
 
         return x_dequant
     
-
     def forward(self, x: torch.Tensor, quantize_residual: bool = False):
         if self.n_bits >= 16 or not self.enable:
             return x
         if self.metric == "fix0to1":
             return x.mul_(2**self.n_bits-1).round_().div_(2**self.n_bits-1)
+
+        if quantize_residual:
+            self.n_bits = 8
 
         if self.dynamic_method == "per_token" or self.dynamic_method == "per_channel":
             self.per_token_dynamic_calibration(x)

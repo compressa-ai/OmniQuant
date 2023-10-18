@@ -339,7 +339,7 @@ class QuantLlamaDecoderLayer(nn.Module):
         for name, module in self.named_modules():
             if isinstance(module, QuantLinear):
                 module.weight = module.weight_quantizer(
-                    module.weight, hard=True, quantize_residual=self.quantize_residual
+                    module.weight, quantize_residual=self.quantize_residual, hard=True
                 )
                 module.use_temporary_parameter=False
 

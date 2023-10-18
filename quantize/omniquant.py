@@ -154,14 +154,15 @@ def omniquant(
     for i in range(len(layers)):
         logger.info(f"=== Start quantize layer {i} ===")
         layer = layers[i].to(dev)
-        qlayer = DecoderLayer(
-            lm.model.config, layer, args, quantize_residual=quantize_residual
-        )
 
         if i in residuals:
             quantize_residual = True
         else:
             quantize_residual = False
+
+        qlayer = DecoderLayer(
+            lm.model.config, layer, args, quantize_residual=quantize_residual
+        )
 
         # obtain output of full-precision model
         qlayer.set_quant_state(weight_quant=False, act_quant=False)

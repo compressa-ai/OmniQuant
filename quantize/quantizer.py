@@ -166,7 +166,7 @@ class UniformAffineQuantizer(nn.Module):
         self.qmin = 0
         self.qmax = 2 ** (n_bits) - 1
 
-    def fake_quant(self, x, scale, round_zero_point, hard):
+    def fake_quant(self, x, scale, round_zero_point, quantize_residual, hard):
         if self.deficiency > 0:
             pad_zeros = torch.zeros((x.shape[0],self.deficiency),dtype=x.dtype,device=x.device)
             x = torch.cat((x,pad_zeros),dim=1)
@@ -176,7 +176,7 @@ class UniformAffineQuantizer(nn.Module):
             dim1, dim2 = x.shape
             x = x.reshape(-1, self.group_size)
 
-        if self.alpha is not None:
+        if self.alpha is not None and not quantize_residual:
             x_dequant = self.adaround_forward(
                 x, scale, round_zero_point, hard=hard
             )
@@ -196,7 +196,8 @@ class UniformAffineQuantizer(nn.Module):
             x_dequant = x_dequant[:,:-self.deficiency]
         return x_dequant
 
-    def forward(self, x: torch.Tensor, hard=False, quantize_residual: bool = False):
+    def forward(self, x: torch.Tensor,
+                quantize_residual: bool = False, hard=False):
         if self.n_bits >= 16 or not self.enable:
             return x
         if self.metric == "fix0to1":
@@ -211,7 +212,8 @@ class UniformAffineQuantizer(nn.Module):
             raise NotImplementedError()   
 
         x_dequant = self.fake_quant(
-            x, self.scale, self.round_zero_point, hard
+            x, self.scale, self.round_zero_point,
+            hard, quantize_residual
         )
         self.num_iters += 1
 

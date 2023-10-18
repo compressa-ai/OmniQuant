@@ -196,7 +196,8 @@ class QuantLlamaDecoderLayer(nn.Module):
     def __init__(self, 
                  config: LlamaConfig,
                  ori_layer,
-                 args):
+                 args,
+                 quantize_residual: bool = False):
         super().__init__()
         self.hidden_size = config.hidden_size
         self.self_attn = QuantLlamaAttention(
@@ -213,6 +214,7 @@ class QuantLlamaDecoderLayer(nn.Module):
         )
         self.input_layernorm = OmniLlamaRMSNorm(ori_layer.input_layernorm,eps=ori_layer.input_layernorm.variance_epsilon)
         self.post_attention_layernorm = OmniLlamaRMSNorm(ori_layer.post_attention_layernorm,eps=ori_layer.post_attention_layernorm.variance_epsilon)
+        self.quantize_residual = quantize_residual
 
     def forward(
         self,
@@ -303,9 +305,13 @@ class QuantLlamaDecoderLayer(nn.Module):
         for name, module in self.named_modules():
             if isinstance(module, QuantLinear):
                 if hasattr(module, "temp_weight"):
-                    module.temp_weight = module.weight_quantizer(module.temp_weight)
+                    module.temp_weight = module.weight_quantizer(
+                        module.temp_weight, quantize_residual=self.quantize_residual
+                    )
                 else:
-                    module.temp_weight = module.weight_quantizer(module.weight)
+                    module.temp_weight = module.weight_quantizer(
+                        module.weight, quantize_residual=self.quantize_residual
+                    )
                 if not hasattr(module, "temp_bias"):
                     module.temp_bias = module.bias
                 module.use_temporary_parameter=True
@@ -333,7 +339,7 @@ class QuantLlamaDecoderLayer(nn.Module):
         for name, module in self.named_modules():
             if isinstance(module, QuantLinear):
                 module.weight = module.weight_quantizer(
-                    module.weight, hard=True
+                    module.weight, hard=True, quantize_residual=self.quantize_residual
                 )
                 module.use_temporary_parameter=False
 

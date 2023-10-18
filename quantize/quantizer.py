@@ -120,7 +120,7 @@ class UniformAffineQuantizer(nn.Module):
         """
         return ((self.zeta - self.gamma) * torch.sigmoid(self.alpha) + self.gamma).clamp(0, 1)
 
-    def adaround_forward(self, X, scale, zero_point, hard_value=False):
+    def adaround_forward(self, X, scale, zero_point, hard=False):
         if self.num_iters == 0:
             # print(f'!!! INIT ALPHA')
             self.init_alpha(X.data.clone().detach(), scale, zero_point)
@@ -139,7 +139,7 @@ class UniformAffineQuantizer(nn.Module):
         zero_point = zero_point.data
 
         X = torch.floor(X / scale)
-        if hard_value:
+        if hard:
             print('!!! Hard AdaRound !!!')
             X += (self.alpha >= 0).float()
         else:
@@ -178,7 +178,7 @@ class UniformAffineQuantizer(nn.Module):
 
         if self.alpha is not None:
             x_dequant = self.adaround_forward(
-                x, scale, round_zero_point, hard_value=hard
+                x, scale, round_zero_point, hard=hard
             )
         else:
             x_int = round_ste(x / scale)
@@ -195,13 +195,15 @@ class UniformAffineQuantizer(nn.Module):
         if self.deficiency > 0:
             x_dequant = x_dequant[:,:-self.deficiency]
         return x_dequant
-    
 
-    def forward(self, x: torch.Tensor, hard=False):
+    def forward(self, x: torch.Tensor, hard=False, quantize_residual: bool = False):
         if self.n_bits >= 16 or not self.enable:
             return x
         if self.metric == "fix0to1":
             return x.mul_(2**self.n_bits-1).round_().div_(2**self.n_bits-1)
+
+        if quantize_residual:
+            self.change_n_bits(8)
 
         if self.dynamic_method == "per_token" or self.dynamic_method == "per_channel":
             self.per_token_dynamic_calibration(x)

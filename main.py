@@ -207,6 +207,7 @@ def main():
     parser.add_argument("--w_dynamic_method", type=str, default="per_channel", choices=["per_channel"])
     parser.add_argument("--limit", type=int, default=-1)
     parser.add_argument("--multigpu", action="store_true", help="at eval, map model to multiple gpus")
+    parser.add_argument("--residuals", type=str, default=None)
 
     args = parser.parse_args()
     random.seed(args.seed)

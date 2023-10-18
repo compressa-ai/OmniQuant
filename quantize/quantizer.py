@@ -106,7 +106,7 @@ class UniformAffineQuantizer(nn.Module):
             x_dequant = x_dequant[:,:-self.deficiency]
 
         return x_dequant
-    
+
     def forward(self, x: torch.Tensor, quantize_residual: bool = False):
         if self.n_bits >= 16 or not self.enable:
             return x
@@ -114,7 +114,7 @@ class UniformAffineQuantizer(nn.Module):
             return x.mul_(2**self.n_bits-1).round_().div_(2**self.n_bits-1)
 
         if quantize_residual:
-            self.n_bits = 8
+            self.change_n_bits(8)
 
         if self.dynamic_method == "per_token" or self.dynamic_method == "per_channel":
             self.per_token_dynamic_calibration(x)
@@ -122,7 +122,7 @@ class UniformAffineQuantizer(nn.Module):
             raise NotImplementedError()   
 
         x_dequant = self.fake_quant(
-            x, self.scale, self.round_zero_point, quantize_residual=quantize_residual
+            x, self.scale, self.round_zero_point
         )
         return x_dequant
 
@@ -136,7 +136,7 @@ class UniformAffineQuantizer(nn.Module):
                 x = x.reshape(-1,self.group_size)
         reduce_shape = [-1]
         xmin = x.amin(reduce_shape, keepdim=True)
-        xmax =  x.amax(reduce_shape, keepdim=True)
+        xmax = x.amax(reduce_shape, keepdim=True)
 
         if self.lwc:
             xmax = self.sigmoid(self.upbound_factor)*xmax

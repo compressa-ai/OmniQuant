@@ -233,19 +233,19 @@ def omniquant(
                         
                     loss_list.append(loss)
                     optimizer.zero_grad()
-                    norm = loss_scaler(loss, optimizer, parameters=qlayer.omni_parameters(use_shift))
-                    norm_list.append(norm.data)
+                    # norm = loss_scaler(loss, optimizer, parameters=qlayer.omni_parameters(use_shift))
+                    # norm_list.append(norm.data)
 
                 mean_res = np.array(results).mean(axis=0)
-                loss_mean = torch.stack(loss_list).mean()
-                norm_mean = torch.stack(norm_list).mean()
-                logger.info(f"layer {i} iter {epochs} loss:{loss_mean} norm:{norm_mean} params:{mean_res} max memory_allocated {torch.cuda.max_memory_allocated(lm._device) / 1024**2} ")
+                loss_mean = torch.tensor(loss_list).mean()
+                # norm_mean = torch.stack(norm_list).mean()
+                logger.info(f"layer {i} iter {epochs} loss:{loss_mean} norm:UNK params:{mean_res} max memory_allocated {torch.cuda.max_memory_allocated(lm._device) / 1024**2} ")
 
             qlayer.clear_temp_variable()
             del optimizer
 
         # real smooth and quantization
-        qlayer.smooth_and_quant_inplace()
+        qlayer.smooth_and_quant_inplace(mean_res)
         if args.epochs>0:
             # update input of quantization model
             with torch.no_grad():

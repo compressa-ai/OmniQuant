@@ -317,7 +317,7 @@ class QuantLlamaDecoderLayer(nn.Module):
                 del module.temp_bias
 
     @torch.no_grad()
-    def smooth_and_quant_inplace(self):
+    def smooth_and_quant_inplace(self, p):
         if self.let:
             for name, module in self.named_parameters():
                 if "smooth_scale" in name:
@@ -332,7 +332,7 @@ class QuantLlamaDecoderLayer(nn.Module):
                                 self.qkt_smooth_scale)
         for name, module in self.named_modules():
             if isinstance(module, QuantLinear):
-                module.weight = module.weight_quantizer(module.weight)
+                module.weight = module.weight_quantizer(module.weight, p)
                 module.use_temporary_parameter=False
 
     def let_parameters(self, use_shift=True):

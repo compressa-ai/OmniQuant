@@ -221,7 +221,7 @@ class UniformAffineQuantizer(nn.Module):
 
         if p is not None:
             self.scale = p[0] * self.scale_orig
-            self.round_zero_point = p[1] * self.round_zero_point_orig
+            self.round_zero_point = p[1] + self.round_zero_point_orig
         elif hasattr(self, 'scale'):
             self.scale = self.scale
             self.round_zero_point = self.round_zero_point
@@ -256,12 +256,12 @@ class UniformAffineQuantizer(nn.Module):
             abs_max = torch.max(xmax.abs(),xmin.abs())
             scale = abs_max / (2**(self.n_bits-1)-1)
             self.scale_orig = scale.clamp(min=CLIPMIN, max=1e4)
-            zero_point = (2**(self.n_bits-1)-1)*torch.ones_like(self.scale)
+            zero_point = (2**(self.n_bits-1)-1)*torch.ones_like(self.scale_orig)
         else:
             range = xmax - xmin
             scale = range / (2**self.n_bits-1)
             self.scale_orig = scale.clamp(min=CLIPMIN, max=1e4)
-            zero_point = -(xmin) / (self.scale)
+            zero_point = -(xmin) / (self.scale_orig)
 
         self.round_zero_point_orig = zero_point.clamp(min=-1e4, max=1e4).round()
 

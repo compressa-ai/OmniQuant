@@ -86,13 +86,6 @@ class UniformAffineQuantizer(nn.Module):
         self.gamma, self.zeta = -0.1, 1.1
         self.round_mode = 'learned_hard_sigmoid'
 
-        if shape is not None:
-            print('Have alpha!')
-            self.alpha = torch.nn.Parameter(torch.ones(*shape).cuda())
-        else:
-            print('No alpha!')
-            self.alpha = None
-
         self.num_iters = torch.nn.Parameter(
             torch.tensor([0]), requires_grad=False
         )
@@ -189,7 +182,7 @@ class UniformAffineQuantizer(nn.Module):
         self.qmin = 0
         self.qmax = 2 ** (n_bits) - 1
 
-    def fake_quant(self, x, scale, round_zero_point, hard):
+    def fake_quant(self, x, scale, round_zero_point):
         if self.deficiency > 0:
             pad_zeros = torch.zeros((x.shape[0],self.deficiency),dtype=x.dtype,device=x.device)
             x = torch.cat((x,pad_zeros),dim=1)
@@ -199,19 +192,14 @@ class UniformAffineQuantizer(nn.Module):
             dim1, dim2 = x.shape
             x = x.reshape(-1, self.group_size)
 
-        if self.alpha is not None:
-            x_dequant = self.adaround_forward(
-                x, scale, round_zero_point, hard_value=hard
-            )
-        else:
-            x_int = round_ste(x / scale)
-            if round_zero_point is not None:
-                x_int = x_int.add(round_zero_point)
-            x_int = x_int.clamp(self.qmin, self.qmax)
-            x_dequant = x_int
-            if round_zero_point is not None:
-                x_dequant = x_dequant.sub(round_zero_point)
-            x_dequant = x_dequant.mul(scale)
+        x_int = round_ste(x / scale)
+        if round_zero_point is not None:
+            x_int = x_int.add(round_zero_point)
+        x_int = x_int.clamp(self.qmin, self.qmax)
+        x_dequant = x_int
+        if round_zero_point is not None:
+            x_dequant = x_dequant.sub(round_zero_point)
+        x_dequant = x_dequant.mul(scale)
 
         if self.group_size:
             x_dequant = x_dequant.reshape(dim1, dim2)
@@ -220,7 +208,7 @@ class UniformAffineQuantizer(nn.Module):
         return x_dequant
     
 
-    def forward(self, x: torch.Tensor, hard=False):
+    def forward(self, x: torch.Tensor, p=None):
         if self.n_bits >= 16 or not self.enable:
             return x
         if self.metric == "fix0to1":
@@ -231,9 +219,18 @@ class UniformAffineQuantizer(nn.Module):
         else:
             raise NotImplementedError()   
 
-        x_dequant = self.fake_quant(
-            x, self.scale, self.round_zero_point, hard
-        )
+        if p is not None:
+            self.scale = p[0] * self.scale_orig
+            self.round_zero_point = p[1] * self.round_zero_point_orig
+        elif hasattr(self, 'scale'):
+            self.scale = self.scale
+            self.round_zero_point = self.round_zero_point
+        else:
+            self.scale = self.scale_orig
+            self.round_zero_point = self.round_zero_point_orig
+
+        x_dequant = self.fake_quant(x, self.scale, self.round_zero_point)
+
         self.num_iters += 1
 
         return x_dequant
@@ -246,24 +243,27 @@ class UniformAffineQuantizer(nn.Module):
                 pad_zeros = torch.zeros((x.shape[0],self.deficiency),dtype=x.dtype,device=x.device)
                 x = torch.cat((x,pad_zeros),dim=1)
                 x = x.reshape(-1,self.group_size)
+
         reduce_shape = [-1]
         xmin = x.amin(reduce_shape, keepdim=True)
-        xmax =  x.amax(reduce_shape, keepdim=True)
-        if self.lwc:
-            xmax = self.sigmoid(self.upbound_factor)*xmax
-            xmin = self.sigmoid(self.lowbound_factor)*xmin
+        xmax = x.amax(reduce_shape, keepdim=True)
+
+        # if self.lwc:
+        #     xmax = self.sigmoid(self.upbound_factor)*xmax
+        #     xmin = self.sigmoid(self.lowbound_factor)*xmin
+
         if self.symmetric:
             abs_max = torch.max(xmax.abs(),xmin.abs())
             scale = abs_max / (2**(self.n_bits-1)-1)
-            self.scale = scale.clamp(min=CLIPMIN, max=1e4)
+            self.scale_orig = scale.clamp(min=CLIPMIN, max=1e4)
             zero_point = (2**(self.n_bits-1)-1)*torch.ones_like(self.scale)
         else:
             range = xmax - xmin
             scale = range / (2**self.n_bits-1)
-            self.scale = scale.clamp(min=CLIPMIN, max=1e4)
+            self.scale_orig = scale.clamp(min=CLIPMIN, max=1e4)
             zero_point = -(xmin) / (self.scale)
-        self.round_zero_point = zero_point.clamp(min=-1e4, max=1e4).round()
 
+        self.round_zero_point_orig = zero_point.clamp(min=-1e4, max=1e4).round()
 
 
 

@@ -1,3 +1,4 @@
+import numpy as np
 import torch
 import torch.nn as nn
 from models.int_llama_layer import QuantLlamaDecoderLayer
@@ -7,8 +8,9 @@ import copy
 import math
 import utils
 import os
-import pdb
 
+import pdb
+import scipy.optimize as opt
 
 
 
@@ -195,31 +197,50 @@ def omniquant(
                  {'params':lwc_params,'lr':args.lwc_lr}],
                 weight_decay=args.wd)
             loss_scaler = utils.NativeScalerWithGradNormCount()
-            
+
+
             for epochs in range(args.epochs):
                 loss_list = []
                 norm_list = []
+
+                # https://github.com/papers-submission/CalibTIP/blob/master/utils/adaquant.py#L17C5-L23C42
+                def layer_err(p, index):
+                    with torch.cuda.amp.autocast():
+                        qlayer.smooth_and_quant_temporary(p)
+                        quant_out = qlayer(
+                            quant_inps[index:index + args.batch_size, ], attention_mask=attention_mask_batch,
+                            position_ids=position_ids)[0]
+                        loss = loss_func(fp_inps[index:index + args.batch_size, ], quant_out)
+                        if args.aug_loss:
+                            loss += loss_func(fp_inps_2[index:index + args.batch_size, ], quant_out)
+
+                    return loss.item()
+
+                init = np.array([1, 0])
+                results = []
+
                 for j in range(args.nsamples//args.batch_size):    
                     index = j * args.batch_size
                     # obtain output of quantization model
-                    with torch.cuda.amp.autocast():
-                        qlayer.smooth_and_quant_temporary()
-                        quant_out = qlayer(quant_inps[index:index+args.batch_size,], attention_mask=attention_mask_batch,position_ids=position_ids)[0]
-                        loss = loss_func(fp_inps[index:index+args.batch_size,], quant_out)
-                        if args.aug_loss:
-                            loss += loss_func(fp_inps_2[index:index+args.batch_size,], quant_out)
-                    if not math.isfinite(loss.item()):
+                    res = opt.minimize(lambda p: layer_err(p, index), init, method='Nelder-Mead')
+                    results.append(res.x)
+
+                    loss = res.fun
+
+                    if not math.isfinite(loss):
                         logger.info("Loss is NAN, stopping training")
                         pdb.set_trace()
                         
-                    loss_list.append(loss.data)
+                    loss_list.append(loss)
                     optimizer.zero_grad()
-                    norm = loss_scaler(loss, optimizer,parameters=qlayer.omni_parameters(use_shift))
+                    norm = loss_scaler(loss, optimizer, parameters=qlayer.omni_parameters(use_shift))
                     norm_list.append(norm.data)
 
+                mean_res = np.array(results).mean(axis=0)
                 loss_mean = torch.stack(loss_list).mean()
                 norm_mean = torch.stack(norm_list).mean()
-                logger.info(f"layer {i} iter {epochs} loss:{loss_mean} norm:{norm_mean} max memory_allocated {torch.cuda.max_memory_allocated(lm._device) / 1024**2} ")
+                logger.info(f"layer {i} iter {epochs} loss:{loss_mean} norm:{norm_mean} params:{mean_res} max memory_allocated {torch.cuda.max_memory_allocated(lm._device) / 1024**2} ")
+
             qlayer.clear_temp_variable()
             del optimizer
 

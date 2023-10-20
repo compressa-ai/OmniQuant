@@ -215,8 +215,8 @@ def main():
     torch.cuda.manual_seed(args.seed)
     
     # check
-    if args.epochs > 0:
-        assert args.lwc or args.let
+    # if args.epochs > 0:
+    #     assert args.lwc or args.let
 
     # init logger
     if args.output_dir:
@@ -312,13 +312,14 @@ def main():
 
     logger.info(time.time() - tick)
 
-    if True:  #args.save_dir:
+    if args.save_dir:
         # delete omni parameters
         for name, module in lm.model.named_modules():
             if isinstance(module, QuantLinear):
-                del module.weight_quantizer.alpha
                 del module.weight_quantizer.scale
-                del module.weight_quantizer.zero_point
+                del module.weight_quantizer.round_zero_point
+                del module.weight_quantizer.scale_orig
+                del module.weight_quantizer.round_zero_point_orig
                 del module.weight_quantizer.lowbound_factor
                 del module.weight_quantizer.upbound_factor
             if isinstance(module,QuantLlamaDecoderLayer) or isinstance(module,QuantOPTDecoderLayer):

@@ -280,7 +280,7 @@ class QuantLlamaDecoderLayer(nn.Module):
                 names.append(name)
                 m.set_quant_state(weight_quant, act_quant)
       
-    def smooth_and_quant_temporary(self, p):
+    def smooth_and_quant_temporary(self, layer_index, p):
         if self.let:
             with torch.no_grad():
                 for name, module in self.named_parameters():
@@ -300,15 +300,26 @@ class QuantLlamaDecoderLayer(nn.Module):
                 if isinstance(module, QuantLinear):
                     module.temp_weight = module.weight
         # quant
+        linear_index = -1
+        flag = False
+
         for name, module in self.named_modules():
             if isinstance(module, QuantLinear):
+                linear_index += 1
+                coeffs = p if layer_index == linear_index else None
+                flag = flag or coeffs is not None
+
                 if hasattr(module, "temp_weight"):
-                    module.temp_weight = module.weight_quantizer(module.temp_weight, p)
+                    module.temp_weight = module.weight_quantizer(module.temp_weight, coeffs)
                 else:
-                    module.temp_weight = module.weight_quantizer(module.weight, p)
+                    module.temp_weight = module.weight_quantizer(module.weight, coeffs)
+
                 if not hasattr(module, "temp_bias"):
                     module.temp_bias = module.bias
+
                 module.use_temporary_parameter=True
+
+        assert flag
 
     def clear_temp_variable(self):
        for name, module in self.named_modules():
@@ -317,7 +328,7 @@ class QuantLlamaDecoderLayer(nn.Module):
                 del module.temp_bias
 
     @torch.no_grad()
-    def smooth_and_quant_inplace(self, p):
+    def smooth_and_quant_inplace(self, layer_index, p):
         if self.let:
             for name, module in self.named_parameters():
                 if "smooth_scale" in name:
@@ -330,10 +341,20 @@ class QuantLlamaDecoderLayer(nn.Module):
                                 self.out_smooth_scale, self.out_smooth_shift)
             smooth_q_k_inplace(self.self_attn.q_proj, self.self_attn.k_proj,
                                 self.qkt_smooth_scale)
+
+        linear_index = 0
+        flag = False
+
         for name, module in self.named_modules():
             if isinstance(module, QuantLinear):
-                module.weight = module.weight_quantizer(module.weight, p)
+                linear_index += 1
+                coeffs = p if layer_index == linear_index else None
+                flag = flag or coeffs is not None
+
+                module.weight = module.weight_quantizer(module.weight, coeffs)
                 module.use_temporary_parameter=False
+
+        assert flag
 
     def let_parameters(self, use_shift=True):
         params = []

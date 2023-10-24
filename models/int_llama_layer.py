@@ -306,6 +306,10 @@ class QuantLlamaDecoderLayer(nn.Module):
         for name, module in self.named_modules():
             if isinstance(module, QuantLinear):
                 linear_index += 1
+
+                if layer_index != linear_index:
+                    continue
+
                 coeffs = p if layer_index == linear_index else None
                 flag = flag or coeffs is not None
 
@@ -342,19 +346,23 @@ class QuantLlamaDecoderLayer(nn.Module):
             smooth_q_k_inplace(self.self_attn.q_proj, self.self_attn.k_proj,
                                 self.qkt_smooth_scale)
 
-        linear_index = 0
+        linear_index = -1
         flag = False
 
         for name, module in self.named_modules():
             if isinstance(module, QuantLinear):
                 linear_index += 1
+
+                if layer_index != linear_index:
+                    continue
+
                 coeffs = p if layer_index == linear_index else None
                 flag = flag or coeffs is not None
 
                 module.weight = module.weight_quantizer(module.weight, coeffs)
                 module.use_temporary_parameter=False
 
-        assert flag
+        assert flag, linear_index
 
     def let_parameters(self, use_shift=True):
         params = []

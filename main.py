@@ -215,8 +215,8 @@ def main():
     torch.cuda.manual_seed(args.seed)
     
     # check
-    if args.epochs > 0:
-        assert args.lwc or args.let
+    # if args.epochs > 0:
+    #     assert args.lwc or args.let
 
     # init logger
     if args.output_dir:

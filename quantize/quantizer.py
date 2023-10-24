@@ -81,6 +81,16 @@ class UniformAffineQuantizer(nn.Module):
 
         if shape is not None:
             print('Have alpha!')
+
+            if group_size:
+                dim1 = int(shape[0]*math.ceil(shape[1]/group_size))
+                self.deficiency = shape[-1]%group_size
+                if self.deficiency > 0:
+                    self.deficiency = group_size - self.deficiency
+                    assert self.symmetric   # support for mlc-llm quantization
+            else:
+                dim1 = shape[0]
+
             self.alpha = torch.nn.Parameter(
                 torch.zeros(dim1, 1).cuda()
             )
@@ -187,7 +197,7 @@ class UniformAffineQuantizer(nn.Module):
                 quant_tensor = self.fake_quant(x, scale, round_zero_point)
 
                 q_error = torch.sum(torch.abs(x - quant_tensor)) / denominator
-                quantization_errors.append(q_error)
+                quantization_errors.append(q_error.cpu().detach().numpy())
 
             index_min = np.argmin(quantization_errors)
             best_alpha = alphas[index_min]
@@ -197,7 +207,7 @@ class UniformAffineQuantizer(nn.Module):
             with torch.no_grad():
                 self.alpha.data = best_alpha * range
                 self.perturb.data = (
-                    self._perturb_coeff * torch.random.randn(*self.perturb.shape).cuda()
+                    self._perturb_coeff * torch.randn(*self.perturb.shape).cuda()
                 )
 
         scale = self.alpha / (2**self.n_bits-1)

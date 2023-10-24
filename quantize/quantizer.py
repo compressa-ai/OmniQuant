@@ -76,120 +76,29 @@ class UniformAffineQuantizer(nn.Module):
         self.enable = True
         self.group_size = group_size
 
-
-        # AdaRound
-        self.ch_axis = -1
-        self.drop_prob = 1.0
-
         # self.register_buffer('scale', torch.tensor([1.0], dtype=torch.float))
         # self.register_buffer('zero_point', torch.tensor([0], dtype=torch.int))
-        self.gamma, self.zeta = -0.1, 1.1
-        self.round_mode = 'learned_hard_sigmoid'
 
         if shape is not None:
             print('Have alpha!')
-            self.alpha = torch.nn.Parameter(torch.ones(*shape).cuda())
+            self.alpha = torch.nn.Parameter(
+                torch.zeros(dim1, 1).cuda()
+            )
+            self._perturb_coeff = 1e-5
+            self.perturb = torch.nn.Parameter(
+                torch.zeros(dim1, shape[0] * shape[1] // dim1).cuda()
+            )
         else:
             print('No alpha!')
             self.alpha = None
+            self._perturb_coeff = None
+            self.perturb = None
 
         self.num_iters = torch.nn.Parameter(
             torch.tensor([0]), requires_grad=False
         )
 
-    def init_alpha(self, x: torch.Tensor, scale, zero_point):
-        # if self.ch_axis != -1:
-        #     new_shape = [1] * len(x.shape)
-        #     new_shape[self.ch_axis] = x.shape[self.ch_axis]
-        #     scale = scale.data.reshape(new_shape)
-        # else:
-        #     scale = scale.data
-        scale = scale.data
-
-        x_floor = torch.floor(x / scale)
-        if self.round_mode == 'learned_hard_sigmoid':
-            rest = (x / scale) - x_floor  # rest of rounding [0, 1)
-            alpha = -torch.log((self.zeta - self.gamma) / (rest - self.gamma) - 1)  # => sigmoid(alpha) = rest
-            with torch.no_grad():
-                # self.alpha.data = -4.6 * torch.ones_like(alpha).cuda()  #  alpha
-                self.alpha.data = -2 * torch.ones_like(alpha).cuda()  #  alpha
-        else:
-            raise NotImplementedError
-
-    def rectified_sigmoid(self):
-        """generate rounding mask.
-        """
-        # r = 4 * ((self.zeta - self.gamma) * torch.sigmoid(self.alpha) + self.gamma)
-        # r = 4 * r - 2
-        # r = r.clamp(-2, 2)
-
-        # r = ((self.zeta - self.gamma) * torch.sigmoid(self.alpha) + self.gamma)
-        # r = r.clamp(0, 1)
-
-        # r = 0 * self.alpha
-
-        # r = ((self.zeta - self.gamma) * torch.sigmoid(self.alpha) + self.gamma)
-        r = torch.sigmoid(self.alpha)
-        r = 0.04 * r - 0.02
-        # r = r.clamp(-0.01, 0.01)
-
-        return r
-
-    def adaround_forward(self, X, scale, zero_point, hard_value=False):
-        if self.num_iters == 0:
-            # print(f'!!! INIT ALPHA')
-            self.init_alpha(X.data.clone().detach(), scale, zero_point)
-        # if self.num_iters % 100 == 0:
-        #     print(f'!!! Alpha: {self.alpha.flatten()[:20]}')
-        #     print(f'!!! Upbound: {self.upbound_factor.flatten()[:20]}')
-
-        # print(f'!!! ADAROUND')
-
-        # if self.ch_axis != -1:
-        #     new_shape = [1] * len(X.shape)
-        #     new_shape[self.ch_axis] = X.shape[self.ch_axis]
-        #     scale = scale.data.reshape(new_shape)
-        #     zero_point = zero_point.data.int().reshape(new_shape)
-        # else:
-        #     scale = scale.item()
-        #     zero_point = zero_point.item()
-        scale = scale
-        zero_point = zero_point
-
-        # X += self.rectified_sigmoid()
-        # X = round_ste(
-        #     (X + X.detach().clone() * self.sigmoid(self.alpha)) / scale
-        # )
-        # X = round_ste(
-        #     (X + X.detach().clone() * self.alpha) / scale
-        # )
-        X = round_ste(
-            (X + X.detach().clone() * self.rectified_sigmoid()) / scale
-        )
-        # X = round_ste((X + self.alpha) / scale)
-        X += zero_point
-        X = torch.clamp(X, self.qmin, self.qmax)
-        X = (X - zero_point) * scale
-
-
-        # data = data / alpha
-        # data_c = data.clamp(0, 1)
-        # data_q = data_c.mul(2 ** num_bits - 1).round().div(2 ** num_bits - 1)
-        # data_q = (data_q - data_c).detach() + data_c
-        # data_q = data_q * alpha
-
-        return X
-
-    # def get_hard_value(self, X):
-    #     X = self.adaround_forward(X, hard_value=True)
-    #     return X
-
-    def change_n_bits(self, n_bits):
-        self.n_bits = n_bits
-        self.qmin = 0
-        self.qmax = 2 ** (n_bits) - 1
-
-    def fake_quant(self, x, scale, round_zero_point, hard):
+    def fake_quant(self, x, scale, round_zero_point):
         if self.deficiency > 0:
             pad_zeros = torch.zeros((x.shape[0],self.deficiency),dtype=x.dtype,device=x.device)
             x = torch.cat((x,pad_zeros),dim=1)
@@ -199,19 +108,20 @@ class UniformAffineQuantizer(nn.Module):
             dim1, dim2 = x.shape
             x = x.reshape(-1, self.group_size)
 
-        if self.alpha is not None:
-            x_dequant = self.adaround_forward(
-                x, scale, round_zero_point, hard_value=hard
-            )
-        else:
-            x_int = round_ste(x / scale)
-            if round_zero_point is not None:
-                x_int = x_int.add(round_zero_point)
-            x_int = x_int.clamp(self.qmin, self.qmax)
-            x_dequant = x_int
-            if round_zero_point is not None:
-                x_dequant = x_dequant.sub(round_zero_point)
-            x_dequant = x_dequant.mul(scale)
+        x_int = round_ste(
+            (x + self.perturb) / scale
+        )
+
+        if round_zero_point is not None:
+            x_int = x_int.add(round_zero_point)
+
+        x_int = x_int.clamp(self.qmin, self.qmax)
+        x_dequant = x_int
+
+        if round_zero_point is not None:
+            x_dequant = x_dequant.sub(round_zero_point)
+
+        x_dequant = x_dequant.mul(scale)
 
         if self.group_size:
             x_dequant = x_dequant.reshape(dim1, dim2)
@@ -220,7 +130,7 @@ class UniformAffineQuantizer(nn.Module):
         return x_dequant
     
 
-    def forward(self, x: torch.Tensor, hard=False):
+    def forward(self, x: torch.Tensor):
         if self.n_bits >= 16 or not self.enable:
             return x
         if self.metric == "fix0to1":
@@ -232,7 +142,7 @@ class UniformAffineQuantizer(nn.Module):
             raise NotImplementedError()   
 
         x_dequant = self.fake_quant(
-            x, self.scale, self.round_zero_point, hard
+            x, self.scale, self.round_zero_point,
         )
         self.num_iters += 1
 
@@ -246,146 +156,63 @@ class UniformAffineQuantizer(nn.Module):
                 pad_zeros = torch.zeros((x.shape[0],self.deficiency),dtype=x.dtype,device=x.device)
                 x = torch.cat((x,pad_zeros),dim=1)
                 x = x.reshape(-1,self.group_size)
+
         reduce_shape = [-1]
         xmin = x.amin(reduce_shape, keepdim=True)
-        xmax =  x.amax(reduce_shape, keepdim=True)
-        if self.lwc:
-            xmax = self.sigmoid(self.upbound_factor)*xmax
-            xmin = self.sigmoid(self.lowbound_factor)*xmin
-        if self.symmetric:
-            abs_max = torch.max(xmax.abs(),xmin.abs())
-            scale = abs_max / (2**(self.n_bits-1)-1)
-            self.scale = scale.clamp(min=CLIPMIN, max=1e4)
-            zero_point = (2**(self.n_bits-1)-1)*torch.ones_like(self.scale)
-        else:
+        xmax = x.amax(reduce_shape, keepdim=True)
+
+        # if self.lwc:
+        #     xmax = self.sigmoid(self.upbound_factor)*xmax
+        #     xmin = self.sigmoid(self.lowbound_factor)*xmin
+
+        if self.num_iters == 0:
+            print(f'!!! Initializing alpha...')
+
+            quantization_errors = list()
             range = xmax - xmin
-            scale = range / (2**self.n_bits-1)
-            self.scale = scale.clamp(min=CLIPMIN, max=1e4)
-            zero_point = -(xmin) / (self.scale)
+            alphas = torch.linspace(0.00001, 1, steps=20)
+            input_abs_total_value = torch.sum(torch.abs(x))
+
+            if input_abs_total_value == 0:
+                denominator = 1
+            else:
+                denominator = input_abs_total_value
+
+            for alpha in alphas:
+                scale = alpha * range / (2 ** self.n_bits - 1)
+                scale = scale.clamp(min=CLIPMIN, max=1e4)
+                zero_point = -(xmin) / (scale)
+                round_zero_point = zero_point.clamp(min=-1e4, max=1e4).round()
+
+                quant_tensor = self.fake_quant(x, scale, round_zero_point)
+
+                q_error = torch.sum(torch.abs(x - quant_tensor)) / denominator
+                quantization_errors.append(q_error)
+
+            index_min = np.argmin(quantization_errors)
+            best_alpha = alphas[index_min]
+
+            print(f'!!! Best alpha: {best_alpha.item()}.')
+
+            with torch.no_grad():
+                self.alpha.data = best_alpha * range
+                self.perturb.data = (
+                    self._perturb_coeff * torch.random.randn(*self.perturb.shape).cuda()
+                )
+
+        scale = self.alpha / (2**self.n_bits-1)
+        self.scale = scale.clamp(min=CLIPMIN, max=1e4)
+        zero_point = -(xmin) / (self.scale)
         self.round_zero_point = zero_point.clamp(min=-1e4, max=1e4).round()
 
-
-
-
-def fake_quantize_per_tensor_affine(x, scale, zero_point, quant_min, quant_max):
-    x_int = round_ste(x / scale) + zero_point
-    x_quant = torch.clamp(x_int, quant_min, quant_max)
-    x_dequant = (x_quant - zero_point) * scale
-    return x_dequant
-
-
-def fake_quantize_per_channel_affine(x, scale, zero_point, ch_axis, quant_min, quant_max):
-    new_shape = [1] * len(x.shape)
-    new_shape[ch_axis] = x.shape[ch_axis]
-    scale = scale.reshape(new_shape)
-    zero_point = zero_point.reshape(new_shape)
-    x_int = round_ste(x / scale) + zero_point
-    x_quant = torch.clamp(x_int, quant_min, quant_max)
-    x_dequant = (x_quant - zero_point) * scale
-    return x_dequant
-
-
-class AdaRoundFakeQuantize(nn.Module):
-    """
-    self.adaround=True: turn on up or down forward
-    self.adaround=False: turn on round-to-nearest forward
-    based on the FixedFakeQuantize
-    """
-
-    # def __init__(self, bit=8, symmetric=False, ch_axis=-1):
-    #     super().__init__()
-    #
-    #     self.bit = bit
-    #     self.symmetric = symmetric
-    #     self.ch_axis = ch_axis
-    #     self.observer_enabled = 0
-    #     self.fake_quant_enabled = 0
-    #     self.quant_min = self.observer.quant_min
-    #     self.quant_max = self.observer.quant_max
-    #     self.drop_prob = 1.0
-    #
-    #     self.register_buffer('scale', torch.tensor([1.0], dtype=torch.float))
-    #     self.register_buffer('zero_point', torch.tensor([0], dtype=torch.int))
-    #     self.adaround = False
-    #     self.gamma, self.zeta = -0.1, 1.1
-    #
-    #     self.init()
-
-    # def init(self, weight_tensor: torch.Tensor):
-    #     self.adaround = True
-    #     self.round_mode = 'learned_hard_sigmoid'
-    #     self.init_alpha(x=weight_tensor.data.clone().detach())
-
-    # def init_alpha(self, x: torch.Tensor):
-    #     if self.ch_axis != -1:
-    #         new_shape = [1] * len(x.shape)
-    #         new_shape[self.ch_axis] = x.shape[self.ch_axis]
-    #         scale = self.scale.data.reshape(new_shape)
-    #     else:
-    #         scale = self.scale.data
-    #     x_floor = torch.floor(x / scale)
-    #     if self.round_mode == 'learned_hard_sigmoid':
-    #         rest = (x / scale) - x_floor  # rest of rounding [0, 1)
-    #         alpha = -torch.log((self.zeta - self.gamma) / (rest - self.gamma) - 1)  # => sigmoid(alpha) = rest
-    #         self.alpha = torch.nn.Parameter(alpha)
-    #     else:
-    #         raise NotImplementedError
-
-    # def rectified_sigmoid(self):
-    #     """generate rounding mask.
-    #     """
-    #     return ((self.zeta - self.gamma) * torch.sigmoid(self.alpha) + self.gamma).clamp(0, 1)
-    #
-    # def adaround_forward(self, X, hard_value=False):
-    #     if self.ch_axis != -1:
-    #         new_shape = [1] * len(X.shape)
-    #         new_shape[self.ch_axis] = X.shape[self.ch_axis]
-    #         scale = self.scale.data.reshape(new_shape)
-    #         zero_point = self.zero_point.data.int().reshape(new_shape)
-    #     else:
-    #         scale = self.scale.item()
-    #         zero_point = self.zero_point.item()
-    #     X = torch.floor(X / scale)
-    #     if hard_value:
-    #         X += (self.alpha >= 0).float()
-    #     else:
-    #         X += self.rectified_sigmoid()
-    #     X += zero_point
-    #     X = torch.clamp(X, self.quant_min, self.quant_max)
-    #     X = (X - zero_point) * scale
-    #     return X
-    #
-    # def get_hard_value(self, X):
-    #     X = self.adaround_forward(X, hard_value=True)
-    #     return X
-
-    def forward(self, X):
-        if self.observer_enabled == 1:
-            self.observer(X.detach())
-            _scale, _zero_point = self.observer.calculate_qparams(self.observer.min_val, self.observer.max_val)
-            _scale, _zero_point = _scale.to(self.scale.device), _zero_point.to(self.zero_point.device)
-            if self.scale.shape != _scale.shape:
-                self.scale.resize_(_scale.shape)
-                self.zero_point.resize_(_zero_point.shape)
-            self.scale.copy_(_scale)
-            self.zero_point.copy_(_zero_point)
-
-        if self.fake_quant_enabled == 1:
-            if not self.adaround:
-                if self.ch_axis != -1:
-                    X = fake_quantize_per_channel_affine(
-                        X, self.scale.data, self.zero_point.data.int(), self.ch_axis,
-                        self.quant_min, self.quant_max)
-                else:
-                    X = fake_quantize_per_tensor_affine(
-                        X, self.scale.item(), self.zero_point.item(),
-                        self.quant_min, self.quant_max)
-            else:
-                if not hasattr(self, 'alpha'):
-                    raise NotImplementedError
-                if self.round_mode == 'learned_hard_sigmoid':
-                    X = self.adaround_forward(X)
-                else:
-                    raise NotImplementedError
-        return X
-
+        # if self.symmetric:
+        #     abs_max = torch.max(xmax.abs(),xmin.abs())
+        #     scale = abs_max / (2**(self.n_bits-1)-1)
+        #     self.scale = scale.clamp(min=CLIPMIN, max=1e4)
+        #     zero_point = (2**(self.n_bits-1)-1)*torch.ones_like(self.scale)
+        # else:
+        #     range = xmax - xmin
+        #     scale = range / (2**self.n_bits-1)
+        #     self.scale = scale.clamp(min=CLIPMIN, max=1e4)
+        #     zero_point = -(xmin) / (self.scale)
+        # self.round_zero_point = zero_point.clamp(min=-1e4, max=1e4).round()

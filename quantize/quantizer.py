@@ -92,7 +92,7 @@ class UniformAffineQuantizer(nn.Module):
                 dim1 = shape[0]
 
             self.alpha = torch.nn.Parameter(
-                torch.zeros(dim1, 1).cuda()
+                torch.zeros(dim1, 1).cuda(),
             )
             self._perturb_coeff = 1e-5
             self.perturb = torch.nn.Parameter(
@@ -180,7 +180,7 @@ class UniformAffineQuantizer(nn.Module):
 
             quantization_errors = list()
             range = xmax - xmin
-            alphas = torch.linspace(0.00001, 1, steps=20)
+            alphas = torch.linspace(0.6, 1, steps=100)
             input_abs_total_value = torch.sum(torch.abs(x))
 
             if input_abs_total_value == 0:

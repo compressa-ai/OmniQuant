@@ -317,10 +317,11 @@ def main():
         for name, module in lm.model.named_modules():
             if isinstance(module, QuantLinear):
                 del module.weight_quantizer.alpha
+                del module.weight_quantizer.perturb
                 del module.weight_quantizer.scale
                 del module.weight_quantizer.zero_point
-                del module.weight_quantizer.lowbound_factor
-                del module.weight_quantizer.upbound_factor
+                # del module.weight_quantizer.lowbound_factor
+                # del module.weight_quantizer.upbound_factor
             if isinstance(module,QuantLlamaDecoderLayer) or isinstance(module,QuantOPTDecoderLayer):
                 if args.let:
                     del module.qkv_smooth_scale

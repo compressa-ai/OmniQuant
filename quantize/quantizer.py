@@ -94,7 +94,7 @@ class UniformAffineQuantizer(nn.Module):
             self.alpha = torch.nn.Parameter(
                 torch.zeros(dim1, 1).cuda(),
             )
-            self._perturb_coeff = 1e-5
+            self._perturb_coeff = 1e-7
             self.perturb = torch.nn.Parameter(
                 torch.zeros(dim1, shape[0] * shape[1] // dim1).cuda()
             )

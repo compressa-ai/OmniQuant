@@ -197,9 +197,13 @@ def omniquant(
             scheduler = torch.optim.lr_scheduler.StepLR(
                 optimizer, step_size=args.lr_step, gamma=args.lr_gamma
             )
+            # scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(
+            #     optimizer, T_max=args.epochs
+            # )
             loss_scaler = utils.NativeScalerWithGradNormCount()
             
             for epochs in range(args.epochs):
+                print(f'!!! LR before: {scheduler.get_last_lr()}.')
                 loss_list = []
                 norm_list = []
                 for j in range(args.nsamples//args.batch_size):    
@@ -221,6 +225,7 @@ def omniquant(
                     norm_list.append(norm.data)
 
                 scheduler.step()
+                print(f'!!! LR after: {scheduler.get_last_lr()}.')
 
                 loss_mean = torch.stack(loss_list).mean()
                 norm_mean = torch.stack(norm_list).mean()

@@ -186,13 +186,15 @@ def omniquant(
 
             let_params = qlayer.let_parameters(use_shift)
             lwc_params = qlayer.lwc_parameters()
+            perturb_params = qlayer.perturb_parameters()
 
             # print(f'!!! Optimizer LET params: {list(qlayer.let_parameters(use_shift))}.')
             # print(f'!!! Optimizer LWC params: {list(qlayer.lwc_parameters())}.')
 
             optimizer = torch.optim.AdamW(
                 [{'params':let_params,'lr':args.let_lr},
-                 {'params':lwc_params,'lr':args.lwc_lr}],
+                 {'params':lwc_params,'lr':args.lwc_lr},
+                 {'params':perturb_params, 'lr':args.perturb_lr}],
                 weight_decay=args.wd)
             loss_scaler = utils.NativeScalerWithGradNormCount()
             

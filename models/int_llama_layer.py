@@ -352,11 +352,21 @@ class QuantLlamaDecoderLayer(nn.Module):
         params = []
         names = []
         for n, m in self.named_parameters():
-            if n.find('bound_factor') > -1 or n.find('alpha') > -1 or n.find('perturb') > -1:
+            if n.find('bound_factor') > -1 or n.find('alpha') > -1:
                 params.append(m)
                 names.append(n)
         print(f'!!! LWC params: {names}.')
-        return iter(params)  
+        return iter(params)
+
+    def perturb_parameters(self):
+        params = []
+        names = []
+        for n, m in self.named_parameters():
+            if n.find('perturb') > -1:
+                params.append(m)
+                names.append(n)
+        print(f'!!! Perturb params: {names}.')
+        return iter(params)
 
     def omni_parameters(self, use_shift=True):
         params = []

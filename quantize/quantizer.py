@@ -178,41 +178,44 @@ class UniformAffineQuantizer(nn.Module):
         if self.num_iters == 0:
             print(f'!!! Initializing alpha...')
 
-            quantization_errors = list()
-            range = xmax - xmin
-            alphas = torch.linspace(0.6, 1, steps=100)
-            input_abs_total_value = torch.sum(torch.abs(x))
+            import scipy.optimize as opt
 
-            if input_abs_total_value == 0:
-                denominator = 1
-            else:
-                denominator = input_abs_total_value
+            def layer_err(p):
+                range = xmax - xmin
+                input_abs_total_value = torch.sum(torch.abs(x))
 
-            for alpha in alphas:
-                scale = alpha * range / (2 ** self.n_bits - 1)
+                if input_abs_total_value == 0:
+                    denominator = 1
+                else:
+                    denominator = input_abs_total_value
+
+                scale = p[0] * range / (2 ** self.n_bits - 1)
                 scale = scale.clamp(min=CLIPMIN, max=1e4)
-                zero_point = -(xmin) / (scale)
+                zero_point = -(xmin) / (scale) + p[1]
                 round_zero_point = zero_point.clamp(min=-1e4, max=1e4).round()
 
                 quant_tensor = self.fake_quant(x, scale, round_zero_point)
-
                 q_error = torch.sum(torch.abs(x - quant_tensor)) / denominator
-                quantization_errors.append(q_error.cpu().detach().numpy())
 
-            index_min = np.argmin(quantization_errors)
-            best_alpha = alphas[index_min]
+                return q_error.cpu().detach().numpy()
 
-            print(f'!!! Best alpha: {best_alpha.item()}.')
+            init = np.array([1, 0])
+            res = opt.minimize(lambda p: layer_err(p), init, method='Nelder-Mead')
+
+            print(f'!!! Best alpha: {res.x[0]}, best shift: {res.x[1]}.')
 
             with torch.no_grad():
-                self.alpha.data = best_alpha * range
+                range = xmax - xmin
+                self.alpha.data = res[0] * range
                 self.perturb.data = (
                     self._perturb_coeff * torch.randn(*self.perturb.shape).cuda()
                 )
 
+            self._static_shift = res[1]
+
         scale = self.alpha / (2**self.n_bits-1)
         self.scale = scale.clamp(min=CLIPMIN, max=1e4)
-        zero_point = -(xmin) / (self.scale)
+        zero_point = -(xmin) / (self.scale) + self._static_shift
         self.round_zero_point = zero_point.clamp(min=-1e4, max=1e4).round()
 
         # if self.symmetric:

@@ -94,6 +94,9 @@ class UniformAffineQuantizer(nn.Module):
             self.alpha = torch.nn.Parameter(
                 torch.zeros(dim1, 1).cuda(),
             )
+            self.shift = torch.nn.Parameter(
+                torch.zeros(dim1, 1).cuda(),
+            )
             self._perturb_coeff = 1e-5
             self.perturb = torch.nn.Parameter(
                 torch.zeros(dim1, shape[0] * shape[1] // dim1).cuda()
@@ -101,6 +104,7 @@ class UniformAffineQuantizer(nn.Module):
         else:
             print('No alpha!')
             self.alpha = None
+            self.shift = None
             self._perturb_coeff = None
             self.perturb = None
 
@@ -191,7 +195,7 @@ class UniformAffineQuantizer(nn.Module):
 
                 scale = p[0] * range / (2 ** self.n_bits - 1)
                 scale = scale.clamp(min=CLIPMIN, max=1e4)
-                zero_point = -(xmin) / (scale) + p[1]
+                zero_point = -(xmin + p[1]) / (scale)
                 round_zero_point = zero_point.clamp(min=-1e4, max=1e4).round()
 
                 quant_tensor = self.fake_quant(x, scale, round_zero_point)
@@ -206,16 +210,15 @@ class UniformAffineQuantizer(nn.Module):
 
             with torch.no_grad():
                 range = xmax - xmin
-                self.alpha.data = res[0] * range
+                self.alpha.data = res.x[0] * range
+                self.shift.data = res.x[1] * self.shift.data
                 self.perturb.data = (
                     self._perturb_coeff * torch.randn(*self.perturb.shape).cuda()
                 )
 
-            self._static_shift = res[1]
-
         scale = self.alpha / (2**self.n_bits-1)
         self.scale = scale.clamp(min=CLIPMIN, max=1e4)
-        zero_point = -(xmin) / (self.scale) + self._static_shift
+        zero_point = -(xmin + self.shift) / (self.scale)
         self.round_zero_point = zero_point.clamp(min=-1e4, max=1e4).round()
 
         # if self.symmetric:

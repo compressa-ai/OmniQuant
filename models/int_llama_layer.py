@@ -352,7 +352,7 @@ class QuantLlamaDecoderLayer(nn.Module):
         params = []
         names = []
         for n, m in self.named_parameters():
-            if n.find('bound_factor') > -1 or n.find('alpha') > -1 or n.find('perturb') > -1:
+            if n.find('bound_factor') > -1 or n.find('alpha') > -1 or n.find('shift') > -1 or n.find('perturb') > -1:
                 params.append(m)
                 names.append(n)
         print(f'!!! LWC params: {names}.')

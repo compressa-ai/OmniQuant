@@ -197,6 +197,8 @@ def main():
     parser.add_argument("--alpha", type=float, default=0.5)
     parser.add_argument("--let_lr", type=float, default=5e-3)
     parser.add_argument("--lwc_lr", type=float, default=1e-2)
+    parser.add_argument("--lr_step", type=int, default=100)
+    parser.add_argument("--lr_gamma", type=float, default=0.1)
     parser.add_argument("--wd", type=float, default=0)
     parser.add_argument("--epochs", type=int, default=10)
     parser.add_argument("--let",default=False, action="store_true",help="activate learnable equivalent transformation")

@@ -194,6 +194,9 @@ def omniquant(
                 [{'params':let_params,'lr':args.let_lr},
                  {'params':lwc_params,'lr':args.lwc_lr}],
                 weight_decay=args.wd)
+            scheduler = torch.optim.lr_scheduler.StepLR(
+                optimizer, step_size=args.lr_step, gamma=args.lr_gamma
+            )
             loss_scaler = utils.NativeScalerWithGradNormCount()
             
             for epochs in range(args.epochs):
@@ -216,6 +219,8 @@ def omniquant(
                     optimizer.zero_grad()
                     norm = loss_scaler(loss, optimizer,parameters=qlayer.omni_parameters(use_shift))
                     norm_list.append(norm.data)
+
+                scheduler.step()
 
                 loss_mean = torch.stack(loss_list).mean()
                 norm_mean = torch.stack(norm_list).mean()

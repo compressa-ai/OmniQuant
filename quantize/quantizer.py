@@ -176,36 +176,47 @@ class UniformAffineQuantizer(nn.Module):
         #     xmin = self.sigmoid(self.lowbound_factor)*xmin
 
         if self.num_iters == 0:
-            print(f'!!! Initializing alpha...')
+            print(f'!!! Initializing alphas...')
 
-            quantization_errors = list()
-            range = xmax - xmin
-            alphas = torch.linspace(0.6, 1, steps=100)
-            input_abs_total_value = torch.sum(torch.abs(x))
+            best_alphas = list()
 
-            if input_abs_total_value == 0:
-                denominator = 1
-            else:
-                denominator = input_abs_total_value
+            for group_index in range(x.shape[0]):
+                quantization_errors = list()
+                x_range = xmax - xmin
+                alphas = torch.linspace(0.6, 1.0, steps=100)
+                input_abs_total_value = torch.sum(torch.abs(x[group_index, :]))
 
-            for alpha in alphas:
-                scale = alpha * range / (2 ** self.n_bits - 1)
-                scale = scale.clamp(min=CLIPMIN, max=1e4)
-                zero_point = -(xmin) / (scale)
-                round_zero_point = zero_point.clamp(min=-1e4, max=1e4).round()
+                if input_abs_total_value == 0:
+                    denominator = 1
+                else:
+                    denominator = input_abs_total_value
 
-                quant_tensor = self.fake_quant(x, scale, round_zero_point)
+                for alpha in alphas:
+                    scale = alpha * x_range / (2 ** self.n_bits - 1)
+                    scale = scale.clamp(min=CLIPMIN, max=1e4)
+                    zero_point = -(xmin) / (scale)
+                    round_zero_point = zero_point.clamp(min=-1e4, max=1e4).round()
 
-                q_error = torch.sum(torch.abs(x - quant_tensor)) / denominator
-                quantization_errors.append(q_error.cpu().detach().numpy())
+                    quant_tensor = self.fake_quant(x, scale, round_zero_point)
 
-            index_min = np.argmin(quantization_errors)
-            best_alpha = alphas[index_min]
+                    q_error = torch.sum(torch.abs(
+                        x[group_index, :] - quant_tensor[group_index, :]
+                    ))
+                    q_error /= denominator
+                    q_error = q_error.cpu().detach().numpy()
+                    quantization_errors.append(q_error)
 
-            print(f'!!! Best alpha: {best_alpha.item()}.')
+                index_min = np.argmin(quantization_errors)
+                best_alpha = alphas[index_min]
+                best_alphas.append(best_alpha)
+
+            print(f'!!! Best alphas: {[a.item() for a in best_alphas[:10]]}...')
 
             with torch.no_grad():
-                self.alpha.data = best_alpha * range
+                for group_index in range(x.shape[0]):  # TODO: cycle not cool
+                    self.alpha.data[group_index, :] = (
+                        best_alphas[group_index] * x_range[group_index, :]
+                    )
                 self.perturb.data = (
                     self._perturb_coeff * torch.randn(*self.perturb.shape).cuda()
                 )

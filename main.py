@@ -201,6 +201,7 @@ def main():
     parser.add_argument("--epochs", type=int, default=10)
     parser.add_argument("--let",default=False, action="store_true",help="activate learnable equivalent transformation")
     parser.add_argument("--lwc",default=False, action="store_true",help="activate learnable weight clipping")
+    parser.add_argument("--ord_loss", default=True, action="store_true")
     parser.add_argument("--aug_loss", default=False, action="store_true", help="calculate additional loss with same input")
     parser.add_argument("--symmetric",default=False, action="store_true", help="symmetric quantization")
     parser.add_argument("--a_dynamic_method", type=str, default="per_token", choices=["per_token"])

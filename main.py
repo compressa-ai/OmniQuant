@@ -203,6 +203,7 @@ def main():
     parser.add_argument("--let",default=False, action="store_true",help="activate learnable equivalent transformation")
     parser.add_argument("--lwc",default=False, action="store_true",help="activate learnable weight clipping")
     parser.add_argument("--aug_loss", default=False, action="store_true", help="calculate additional loss with same input")
+    parser.add_argument("--no_ord_loss", default=False, action="store_true")
     parser.add_argument("--symmetric",default=False, action="store_true", help="symmetric quantization")
     parser.add_argument("--a_dynamic_method", type=str, default="per_token", choices=["per_token"])
     parser.add_argument("--w_dynamic_method", type=str, default="per_channel", choices=["per_channel"])
@@ -218,6 +219,8 @@ def main():
     # check
     # if args.epochs > 0:
     #     assert args.lwc or args.let
+
+    assert not args.no_ord_loss or args.aug_loss
 
     # init logger
     if args.output_dir:

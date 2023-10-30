@@ -115,8 +115,8 @@ def omniquant(
     
     # same input of first layer for fp model and quant model
     quant_inps = inps
-    fp_inps = copy.deepcopy(inps)   # take output of fp model as input
-    fp_inps_2 = copy.deepcopy(inps) if args.aug_loss else None # take output of quantization model as input
+    fp_inps = copy.deepcopy(inps) if not args.no_ord_loss else None  # take output of fp model as input
+    fp_inps_2 = copy.deepcopy(inps) if args.aug_loss else None  # take output of quantization model as input
     
     attention_mask = cache["attention_mask"]
     attention_mask_batch = attention_mask.repeat(args.batch_size,1,1,1)
@@ -147,7 +147,8 @@ def omniquant(
             with torch.no_grad():
                 with torch.cuda.amp.autocast():
                     for j in range(args.nsamples):
-                        fp_inps[j] = qlayer(fp_inps[j].unsqueeze(0), attention_mask=attention_mask,position_ids=position_ids)[0]
+                        if not args.no_ord_loss:
+                            fp_inps[j] = qlayer(fp_inps[j].unsqueeze(0), attention_mask=attention_mask,position_ids=position_ids)[0]
                         if args.aug_loss:
                             fp_inps_2[j] = qlayer(quant_inps[j].unsqueeze(0), attention_mask=attention_mask,position_ids=position_ids)[0]
 
@@ -207,9 +208,13 @@ def omniquant(
                     with torch.cuda.amp.autocast():
                         qlayer.smooth_and_quant_temporary()
                         quant_out = qlayer(quant_inps[index:index+args.batch_size,], attention_mask=attention_mask_batch,position_ids=position_ids)[0]
-                        loss = loss_func(fp_inps[index:index+args.batch_size,], quant_out)
+                        if not args.no_ord_loss:
+                            loss1 = loss_func(fp_inps[index:index+args.batch_size,], quant_out)
+                            loss2 = 0
                         if args.aug_loss:
-                            loss += loss_func(fp_inps_2[index:index+args.batch_size,], quant_out)
+                            loss1 = 0
+                            loss2 = loss_func(fp_inps_2[index:index+args.batch_size,], quant_out)
+                        loss = loss1 + loss2
                     if not math.isfinite(loss.item()):
                         logger.info("Loss is NAN, stopping training")
                         pdb.set_trace()

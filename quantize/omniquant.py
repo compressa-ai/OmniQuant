@@ -208,11 +208,11 @@ def omniquant(
                     with torch.cuda.amp.autocast():
                         qlayer.smooth_and_quant_temporary()
                         quant_out = qlayer(quant_inps[index:index+args.batch_size,], attention_mask=attention_mask_batch,position_ids=position_ids)[0]
+                        loss1 = 0
+                        loss2 = 0
                         if not args.no_ord_loss:
                             loss1 = loss_func(fp_inps[index:index+args.batch_size,], quant_out)
-                            loss2 = 0
                         if args.aug_loss:
-                            loss1 = 0
                             loss2 = loss_func(fp_inps_2[index:index+args.batch_size,], quant_out)
                         loss = loss1 + loss2
                     if not math.isfinite(loss.item()):

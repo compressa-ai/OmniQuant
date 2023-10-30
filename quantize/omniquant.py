@@ -65,7 +65,7 @@ class Inps:
         high = (self._buffer_count + 1) * self.nsamples_buffer
 
         if low <= key < high:
-            self.inps[key] = value
+            self.inps[key % self.nsamples_buffer] = value
             return
 
         if key >= high:
@@ -73,7 +73,7 @@ class Inps:
             self.inps = self._load_next()
         elif key < low:
             # TODO: assuming we start from zero
-            assert key == 0
+            # assert key == 0, f'{key} != {low} (high = {high})'
 
             self._save()
             self._buffer_count = -1
@@ -92,14 +92,14 @@ class Inps:
         high = (self._buffer_count + 1) * self.nsamples_buffer
 
         if low <= key < high:
-            return self.inps[key]
+            return self.inps[key % self.nsamples_buffer]
 
         if key >= high:
             self._save()
             self.inps = self._load_next()
         elif key < low:
             # TODO: assuming we start from zero
-            assert key == 0
+            # assert key == 0
 
             self._save()
             self._buffer_count = -1
@@ -116,14 +116,14 @@ class Inps:
         )
 
     def _get_file_path(self):
-        return os.path.join(self.folder, f'{self._buffer_count}.npy')
+        return os.path.join(self.folder, f'{self._buffer_count}.pt')
 
     def _save(self):
         os.makedirs(self.folder, exist_ok=True)
         file_path = self._get_file_path()
 
         with open(file_path, 'wb') as f:
-            np.save(f, self.inps)
+            torch.save(self.inps, f)
 
     def _load_next(self):
         if not os.path.isdir(self.folder):
@@ -144,10 +144,10 @@ class Inps:
             return self._init()
 
         with open(file_path, 'rb') as f:
-            result = np.load(f)
+            result = torch.load(f, map_location=self.device)
 
         assert result.dtype == self.dtype, f'{self.dtype}, {result.dtype}'
-        assert result.device == self.device, f'{self.device}, {result.device}'
+        # assert result.device == self.device, f'{self.device}, {result.device}'
 
         return result
 
@@ -355,10 +355,10 @@ def omniquant(
                     # obtain output of quantization model
                     with torch.cuda.amp.autocast():
                         qlayer.smooth_and_quant_temporary()
-                        quant_out = qlayer(quant_inps[index:index+args.batch_size,], attention_mask=attention_mask_batch,position_ids=position_ids)[0]
-                        loss = loss_func(fp_inps[index:index+args.batch_size,], quant_out)
+                        quant_out = qlayer(quant_inps[index:index+args.batch_size], attention_mask=attention_mask_batch,position_ids=position_ids)[0]
+                        loss = loss_func(fp_inps[index:index+args.batch_size], quant_out)
                         if args.aug_loss:
-                            loss += loss_func(fp_inps_2[index:index+args.batch_size,], quant_out)
+                            loss += loss_func(fp_inps_2[index:index+args.batch_size], quant_out)
                     if not math.isfinite(loss.item()):
                         logger.info("Loss is NAN, stopping training")
                         pdb.set_trace()

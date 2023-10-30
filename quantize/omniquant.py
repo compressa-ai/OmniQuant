@@ -1,3 +1,4 @@
+import numpy as np
 import torch
 import torch.nn as nn
 from models.int_llama_layer import QuantLlamaDecoderLayer
@@ -8,9 +9,147 @@ import math
 import utils
 import os
 import pdb
+import shutil
 
 
 
+class Inps:
+    def __init__(
+            self, name, folder,
+            nsamples, seqlen, hidden_size,
+            dtype, device, nsamples_in_memory=128, batch_size=1):
+
+        if nsamples % nsamples_in_memory != 0:
+            raise ValueError(
+                'Please make sure `nsamples` is divisible by `nsamples_in_memory` without a remainder.'
+            )
+
+        self.name = name
+        self._folder = folder
+        self.folder = os.path.join(self._folder, name)
+
+        self.nsamples_total = nsamples
+        self.nsamples_buffer = nsamples_in_memory
+        self.seqlen = seqlen
+        self.hidden_size = hidden_size
+        self.dtype = dtype
+        self.device = device
+
+        self.inps = self._init()
+
+        self.batch_size = batch_size
+        self._buffer_count = 0
+
+    def deepcopy(self, name, folder):
+        result = Inps(
+            name=name, folder=folder,
+            nsamples=self.nsamples_total, seqlen=self.seqlen,
+            hidden_size=self.hidden_size,
+            dtype=self.dtype, device=self.device,
+            nsamples_in_memory=self.nsamples_buffer, batch_size=self.batch_size
+        )
+
+        assert not os.path.isdir(result.folder)
+
+        shutil.copytree(self.folder, result.folder)
+
+        assert len(os.listdir(result.folder)) == len(os.listdir(self.folder))
+
+        return result
+
+    def __len__(self):
+        return self.nsamples_total
+
+    def __setitem__(self, key, value):
+        low = self._buffer_count * self.nsamples_buffer
+        high = (self._buffer_count + 1) * self.nsamples_buffer
+
+        if low <= key < high:
+            self.inps[key] = value
+            return
+
+        if key >= high:
+            self._save()
+            self.inps = self._load_next()
+        elif key < low:
+            # TODO: assuming we start from zero
+            assert key == 0
+
+            self._save()
+            self._buffer_count = -1
+            self.inps = self._load_next()
+        else:
+            assert False
+
+        self[key] = value
+
+    def __getitem__(self, key):
+        # https://stackoverflow.com/a/9951672/8094251
+        if isinstance(key, slice):
+            return [self[i] for i in range(*key.indices(len(self)))]
+
+        low = self._buffer_count * self.nsamples_buffer
+        high = (self._buffer_count + 1) * self.nsamples_buffer
+
+        if low <= key < high:
+            return self.inps[key]
+
+        if key >= high:
+            self._save()
+            self.inps = self._load_next()
+        elif key < low:
+            # TODO: assuming we start from zero
+            assert key == 0
+
+            self._save()
+            self._buffer_count = -1
+            self.inps = self._load_next()
+        else:
+            assert False
+
+        return self[key]
+
+    def _init(self):
+        return torch.zeros(
+            (self.nsamples_buffer, self.seqlen, self.hidden_size),
+            dtype=self.dtype, device=self.device
+        )
+
+    def _get_file_path(self):
+        return os.path.join(self.folder, f'{self._buffer_count}.npy')
+
+    def _save(self):
+        os.makedirs(self.folder, exist_ok=True)
+        file_path = self._get_file_path()
+
+        with open(file_path, 'wb') as f:
+            np.save(f, self.inps)
+
+    def _load_next(self):
+        if not os.path.isdir(self.folder):
+            print(f'No save folder found for inps "{self.name}"'
+                  f' (count {self._buffer_count}).'
+                  f' Returning zeros.')
+
+            return self._init()
+
+        self._buffer_count += 1
+        file_path = self._get_file_path()
+
+        if not os.path.isfile(file_path):
+            print(f'No saved tensor found for inps "{self.name}"'
+                  f' (count {self._buffer_count}).'
+                  f' Returning zeros.')
+
+            return self._init()
+
+        with open(file_path, 'rb') as f:
+            result = np.load(f)
+
+        assert result.dtype == self.dtype, f'{self.dtype}, {result.dtype}'
+        assert result.device == self.device, f'{self.device}, {result.device}'
+
+        return result
 
 
 
@@ -59,12 +198,18 @@ def omniquant(
         layer_name_prefix = 'model.decoder.layers'
     else:
         raise ValueError("Only support for opt/llama/Llama-2 now")
-    
+
     
     layers[0] = layers[0].to(dev)
     dtype = next(iter(model.parameters())).dtype
-    inps = torch.zeros(
-        (args.nsamples, lm.seqlen, model.config.hidden_size), dtype=dtype, device=dev
+    # inps = torch.zeros(
+    #     (args.nsamples, lm.seqlen, model.config.hidden_size), dtype=dtype, device=dev
+    # )
+    inps = Inps(
+        name='inps', folder=args.samples_dir,
+        nsamples=args.nsamples, seqlen=lm.seqlen,
+        hidden_size=model.config.hidden_size,
+        dtype=dtype, device=dev
     )
     cache = {"i": 0}
 
@@ -85,6 +230,8 @@ def omniquant(
 
     layers[0] = Catcher(layers[0])
     layers[0].is_llama = is_llama
+
+    print(f'!!! Num batches total: {len(dataloader)}.')
 
     with torch.no_grad():
         for batch in dataloader:
@@ -115,9 +262,11 @@ def omniquant(
     
     # same input of first layer for fp model and quant model
     quant_inps = inps
-    fp_inps = copy.deepcopy(inps)   # take output of fp model as input
-    fp_inps_2 = copy.deepcopy(inps) if args.aug_loss else None # take output of quantization model as input
-    
+    # fp_inps = copy.deepcopy(inps)   # take output of fp model as input
+    # fp_inps_2 = copy.deepcopy(inps) if args.aug_loss else None # take output of quantization model as input
+    fp_inps = inps.deepcopy(name='fp_inps', folder=args.samples_dir)  # take output of fp model as input
+    fp_inps_2 = inps.deepcopy(name='fp_inps_2', folder=args.samples_dir) if args.aug_loss else None  # take output of quantization model as input
+
     attention_mask = cache["attention_mask"]
     attention_mask_batch = attention_mask.repeat(args.batch_size,1,1,1)
     loss_func = torch.nn.MSELoss()

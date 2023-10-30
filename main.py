@@ -186,6 +186,7 @@ def main():
         help="Where to extract calibration data from.",
     )
     parser.add_argument("--nsamples", type=int, default=128, help="Number of calibration data samples.")
+    parser.add_argument("--samples_dir", default=None, type=str)
     parser.add_argument("--batch_size", type=int, default=1, help="batch size.")
     parser.add_argument("--seed", type=int, default=2, help="Seed for sampling the calibration data.")
     parser.add_argument("--tasks", default="")
@@ -218,6 +219,9 @@ def main():
     # check
     # if args.epochs > 0:
     #     assert args.lwc or args.let
+
+    if args.nsamples > 128:
+        assert args.samples_dir is not None
 
     # init logger
     if args.output_dir:

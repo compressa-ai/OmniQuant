@@ -49,7 +49,8 @@ class Inps:
             nsamples_in_memory=self.nsamples_buffer, batch_size=self.batch_size
         )
 
-        assert not os.path.isdir(result.folder)
+        if os.path.isdir(result.folder):
+            shutil.rmtree(result.folder)
 
         shutil.copytree(self.folder, result.folder)
 
@@ -86,7 +87,17 @@ class Inps:
     def __getitem__(self, key):
         # https://stackoverflow.com/a/9951672/8094251
         if isinstance(key, slice):
-            return [self[i] for i in range(*key.indices(len(self)))]
+            start, stop, step = key.indices(len(self))
+            is_stop_bigger = stop > start
+            start = start % self.nsamples_buffer
+            stop = stop % self.nsamples_buffer
+
+            if is_stop_bigger and stop <= start:
+                stop = self.nsamples_buffer - 1
+
+                assert stop > start
+
+            return self.inps[start:stop:step]
 
         low = self._buffer_count * self.nsamples_buffer
         high = (self._buffer_count + 1) * self.nsamples_buffer

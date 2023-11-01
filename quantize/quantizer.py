@@ -122,6 +122,29 @@ class UniformAffineQuantizer(nn.Module):
             (x + self.perturb) / scale
         )
 
+        # x_int = round_ste(
+        #     x / scale + self.perturb / scale.detach()
+        # )
+
+        # if self.num_iters < 2 * 128:
+        #     x_int = round_ste(
+        #         (x) / scale
+        #     )
+        # # elif (4 * 128 <= self.num_iters < 6 * 128) or (8 * 128 <= self.num_iters < 10 * 128):
+        # #     x_int = round_ste(
+        # #         (x + self.perturb.detach()) / scale
+        # #     )
+        # elif self.num_iters // 128 in [4, 5, 8, 9]: #, 12, 13, 16, 17, 20, 21, 24, 25, 28, 29]:
+        #     x_int = round_ste(
+        #         (x + self.perturb.detach()) / scale
+        #     )
+        # else:
+        #     print('Freeze scale')
+        #
+        #     x_int = round_ste(
+        #         (x + self.perturb) / scale.detach()
+        #     )
+
         if round_zero_point is not None:
             x_int = x_int.add(round_zero_point)
 

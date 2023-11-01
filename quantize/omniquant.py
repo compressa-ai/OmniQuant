@@ -35,12 +35,24 @@ class Inps:
         self.dtype = dtype
         self.device = device
 
-        self.inps = self._init()
-
         self.batch_size = batch_size
+
         self._buffer_count = 0
+        self.inps = self._load()
 
     def deepcopy(self, name, folder):
+        self._save()
+
+        destination_folder = os.path.join(folder, name)  # TODO: DRY
+        print(f'Copy tensors to: {destination_folder}.')
+
+        if os.path.isdir(destination_folder):
+            shutil.rmtree(destination_folder)
+
+        shutil.copytree(self.folder, destination_folder)
+
+        assert len(os.listdir(destination_folder)) == len(os.listdir(self.folder))
+
         result = Inps(
             name=name, folder=folder,
             nsamples=self.nsamples_total, seqlen=self.seqlen,
@@ -48,13 +60,7 @@ class Inps:
             dtype=self.dtype, device=self.device,
             nsamples_in_memory=self.nsamples_buffer, batch_size=self.batch_size
         )
-
-        if os.path.isdir(result.folder):
-            shutil.rmtree(result.folder)
-
-        shutil.copytree(self.folder, result.folder)
-
-        assert len(os.listdir(result.folder)) == len(os.listdir(self.folder))
+        result.inps = result._load(self._buffer_count)
 
         return result
 
@@ -67,6 +73,8 @@ class Inps:
 
         if low <= key < high:
             self.inps[key % self.nsamples_buffer] = value
+            # self._save()
+
             return
 
         if key >= high:
@@ -85,22 +93,40 @@ class Inps:
         self[key] = value
 
     def __getitem__(self, key):
+        low = self._buffer_count * self.nsamples_buffer
+        high = (self._buffer_count + 1) * self.nsamples_buffer
+
         # https://stackoverflow.com/a/9951672/8094251
         if isinstance(key, slice):
             start, stop, step = key.indices(len(self))
-            is_stop_bigger = stop > start
-            start = start % self.nsamples_buffer
-            stop = stop % self.nsamples_buffer
 
-            if is_stop_bigger and stop <= start:
-                stop = self.nsamples_buffer
+            # TODO: DRY
+            if low <= start < high:
+                is_stop_bigger = stop > start
+                start = start % self.nsamples_buffer
+                stop = stop % self.nsamples_buffer
 
-                assert stop > start
+                if is_stop_bigger and stop <= start:
+                    stop = self.nsamples_buffer
 
-            return self.inps[start:stop:step]
+                    assert stop > start
 
-        low = self._buffer_count * self.nsamples_buffer
-        high = (self._buffer_count + 1) * self.nsamples_buffer
+                return self.inps[start:stop:step]
+
+            if start >= high:
+                self._save()
+                self.inps = self._load_next()
+            elif start < low:
+                # TODO: assuming we start from zero
+                # assert key == 0
+
+                self._save()
+                self._buffer_count = -1
+                self.inps = self._load_next()
+            else:
+                assert False
+
+            return self[key]
 
         if low <= key < high:
             return self.inps[key % self.nsamples_buffer]
@@ -126,8 +152,11 @@ class Inps:
             dtype=self.dtype, device=self.device
         )
 
-    def _get_file_path(self):
-        return os.path.join(self.folder, f'{self._buffer_count}.pt')
+    def _get_file_path(self, i=None):
+        if i is None:
+            i = self._buffer_count
+
+        return os.path.join(self.folder, f'{i}.pt')
 
     def _save(self):
         os.makedirs(self.folder, exist_ok=True)
@@ -136,20 +165,25 @@ class Inps:
         with open(file_path, 'wb') as f:
             torch.save(self.inps, f)
 
-    def _load_next(self):
+    def _load(self, buffer=0):
+        print(f'!!! Loading tensor number {buffer} for "{self.name}"...')
+
+        self._buffer_count = buffer
+
         if not os.path.isdir(self.folder):
-            print(f'No save folder found for inps "{self.name}"'
-                  f' (count {self._buffer_count}).'
+            print(f'No save folder "{self.folder}"'
+                  f' found for inps "{self.name}"'
+                  f' (count {buffer}).'
                   f' Returning zeros.')
 
             return self._init()
 
-        self._buffer_count += 1
-        file_path = self._get_file_path()
+        file_path = self._get_file_path(buffer)
 
         if not os.path.isfile(file_path):
-            print(f'No saved tensor found for inps "{self.name}"'
-                  f' (count {self._buffer_count}).'
+            print(f'No saved tensor file "{file_path}"'
+                  f' found for inps "{self.name}"'
+                  f' (count {buffer}).'
                   f' Returning zeros.')
 
             return self._init()
@@ -161,6 +195,9 @@ class Inps:
         # assert result.device == self.device, f'{self.device}, {result.device}'
 
         return result
+
+    def _load_next(self):
+        return self._load(self._buffer_count + 1)
 
 
 
@@ -277,6 +314,14 @@ def omniquant(
     # fp_inps_2 = copy.deepcopy(inps) if args.aug_loss else None # take output of quantization model as input
     fp_inps = inps.deepcopy(name='fp_inps', folder=args.samples_dir) if not args.no_ord_loss else None  # take output of fp model as input
     fp_inps_2 = inps.deepcopy(name='fp_inps_2', folder=args.samples_dir) if args.aug_loss else None  # take output of quantization model as input
+
+    # print(inps)
+    # print(fp_inps)
+    # print(fp_inps_2)
+
+    print(inps.inps, inps._buffer_count)
+    print(fp_inps.inps, fp_inps._buffer_count)
+    # print(fp_inps_2)
 
     attention_mask = cache["attention_mask"]
     attention_mask_batch = attention_mask.repeat(args.batch_size,1,1,1)

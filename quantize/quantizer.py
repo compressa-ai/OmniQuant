@@ -83,12 +83,15 @@ class UniformAffineQuantizer(nn.Module):
 
         # self.register_buffer('scale', torch.tensor([1.0], dtype=torch.float))
         # self.register_buffer('zero_point', torch.tensor([0], dtype=torch.int))
-        self.gamma, self.zeta = -0.1, 1.1
+        self.delta_round = 4
+        self.gamma, self.zeta = -0.1, self.delta_round * 2 + 0.1
         self.round_mode = 'learned_hard_sigmoid'
 
         if shape is not None:
-            print('Have alpha!')
-            self.alpha = torch.nn.Parameter(torch.ones(*shape).cuda())
+            self.alpha = torch.nn.Parameter(
+                torch.ones(dim1, shape[0] * shape[1] // dim1).cuda()
+            )
+            print(f'Have alpha! Shape: {self.alpha.shape}')
         else:
             print('No alpha!')
             self.alpha = None
@@ -106,19 +109,21 @@ class UniformAffineQuantizer(nn.Module):
         #     scale = scale.data
         scale = scale.data
 
-        x_floor = torch.floor(x / scale)
+        x_floor = torch.floor(x / scale) - self.delta_round
         if self.round_mode == 'learned_hard_sigmoid':
             rest = (x / scale) - x_floor  # rest of rounding [0, 1)
             alpha = -torch.log((self.zeta - self.gamma) / (rest - self.gamma) - 1)  # => sigmoid(alpha) = rest
             with torch.no_grad():
                 self.alpha.data = alpha
+                print(f'Init alpha! Shape: {self.alpha.shape}')
         else:
             raise NotImplementedError
 
     def rectified_sigmoid(self):
         """generate rounding mask.
         """
-        return ((self.zeta - self.gamma) * torch.sigmoid(self.alpha) + self.gamma).clamp(0, 1)
+        return ((self.zeta - self.gamma) * torch.sigmoid(self.alpha)
+                + self.gamma).clamp(0, 2 * self.delta_round)
 
     def adaround_forward(self, X, scale, zero_point, hard_value=False):
         if self.num_iters == 0:
@@ -138,12 +143,21 @@ class UniformAffineQuantizer(nn.Module):
         scale = scale.data
         zero_point = zero_point.data
 
-        X = torch.floor(X / scale)
+        X = torch.floor(X / scale) - self.delta_round
+
         if hard_value:
             print('!!! Hard AdaRound !!!')
-            X += (self.alpha >= 0).float()
-        else:
+            #X += (self.alpha >= 0).float()
+            X += round_ste(self.rectified_sigmoid())
+        # else:
+            # X += self.rectified_sigmoid()
+            # X += round_ste(self.rectified_sigmoid())
+        elif np.random.randint(0, 10) < 9:  # self.num_iters % 10 < 9:  # self.num_iters % 2 == 0:  # self.num_iters % 10 < 5:
             X += self.rectified_sigmoid()
+        else:
+            # X += self.rectified_sigmoid()
+            X += round_ste(self.rectified_sigmoid())
+
         X += zero_point
         X = torch.clamp(X, self.qmin, self.qmax)
         X = (X - zero_point) * scale

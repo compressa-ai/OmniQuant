@@ -342,7 +342,7 @@ class QuantLlamaDecoderLayer(nn.Module):
         names = []
         template = "smooth" if use_shift else "smooth_scale"
         for n, m in self.named_parameters():
-            if n.find(template) > -1:
+            if n.find(template) > -1 or n.find('alpha') > -1:
                 params.append(m)
                 names.append(n)
         print(f'!!! LET params: {names}.')
@@ -352,7 +352,7 @@ class QuantLlamaDecoderLayer(nn.Module):
         params = []
         names = []
         for n, m in self.named_parameters():
-            if n.find('bound_factor') > -1 or n.find('alpha') > -1:
+            if n.find('bound_factor') > -1: # or n.find('alpha') > -1:
                 params.append(m)
                 names.append(n)
         print(f'!!! LWC params: {names}.')

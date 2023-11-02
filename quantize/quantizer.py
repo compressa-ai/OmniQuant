@@ -31,7 +31,10 @@ class UniformAffineQuantizer(nn.Module):
         dynamic_method="per_cluster",
         group_size=None,
         shape=None,
-        lwc=False
+        lwc=False,
+        adaround_adaquant=False,
+        delta_round=1,
+        hard_freq=1,
     ):
         """
         support cluster quantize
@@ -83,9 +86,15 @@ class UniformAffineQuantizer(nn.Module):
 
         # self.register_buffer('scale', torch.tensor([1.0], dtype=torch.float))
         # self.register_buffer('zero_point', torch.tensor([0], dtype=torch.int))
-        self.delta_round = 4
-        self.gamma, self.zeta = -0.1, self.delta_round * 2 + 0.1
+
+        self.adaround_adaquant = adaround_adaquant
+        self.delta_round = delta_round
+        self.delta_range = 2 * self.delta_round + 1
+        self.gamma, self.zeta = -0.1, self.delta_range + 0.1
+        self.hard_freq = hard_freq
         self.round_mode = 'learned_hard_sigmoid'
+
+        print(f'AdaRound params: delta_round={self.delta_round}, delta_range={self.delta_range}, hard_freq={self.hard_freq}')
 
         if shape is not None:
             self.alpha = torch.nn.Parameter(
@@ -123,7 +132,7 @@ class UniformAffineQuantizer(nn.Module):
         """generate rounding mask.
         """
         return ((self.zeta - self.gamma) * torch.sigmoid(self.alpha)
-                + self.gamma).clamp(0, 2 * self.delta_round)
+                + self.gamma).clamp(0, self.delta_range)
 
     def adaround_forward(self, X, scale, zero_point, hard_value=False):
         if self.num_iters == 0:
@@ -152,7 +161,7 @@ class UniformAffineQuantizer(nn.Module):
         # else:
             # X += self.rectified_sigmoid()
             # X += round_ste(self.rectified_sigmoid())
-        elif np.random.randint(0, 10) < 9:  # self.num_iters % 10 < 9:  # self.num_iters % 2 == 0:  # self.num_iters % 10 < 5:
+        elif np.random.randint(0, 10) < 10 - self.hard_freq:  # self.num_iters % 10 < 9:  # self.num_iters % 2 == 0:  # self.num_iters % 10 < 5:
             X += self.rectified_sigmoid()
         else:
             # X += self.rectified_sigmoid()

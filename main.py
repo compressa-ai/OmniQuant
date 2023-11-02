@@ -208,6 +208,10 @@ def main():
     parser.add_argument("--limit", type=int, default=-1)
     parser.add_argument("--multigpu", action="store_true", help="at eval, map model to multiple gpus")
 
+    parser.add_argument("--adaround_adaquant", action="store_true")
+    parser.add_argument("--delta_round", type=int, default=1)
+    parser.add_argument("--hard_freq", type=int, default=1)
+
     args = parser.parse_args()
     random.seed(args.seed)
     np.random.seed(args.seed)
@@ -253,7 +257,6 @@ def main():
             seqlen=lm.seqlen,
         )
         torch.save(dataloader, cache_dataloader)
-        
 
     args.weight_quant_params = {
         "n_bits": args.wbits,
@@ -261,10 +264,13 @@ def main():
         "symmetric": args.symmetric,
         "dynamic_method": args.w_dynamic_method,
         "group_size": args.group_size,
-        "lwc":args.lwc
+        "lwc": args.lwc,
+        "adaround_adaquant": args.adaround_adaquant,
+        "delta_round": args.delta_round,
+        "hard_freq": args.hard_freq,
     }
     args.act_quant_params = {
-        "n_bits":  args.abits,
+        "n_bits": args.abits,
         "per_channel_axes": [],
         "symmetric": False,
         "dynamic_method": args.a_dynamic_method,

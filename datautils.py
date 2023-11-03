@@ -13,7 +13,7 @@ def set_seed(seed):
 
 
 
-def get_pile(nsamples, seed, seqlen, model):
+def get_pile(nsamples, start_sample, seed, seqlen, model):
     print("get_pile")
     traindata = load_dataset("json", data_files='/cpfs01/user/chenmengzhao/prompt_quantization/val.jsonl.zst', split="train")
 
@@ -22,7 +22,7 @@ def get_pile(nsamples, seed, seqlen, model):
 
     random.seed(seed)
     trainloader = []
-    for _ in range(nsamples):
+    for _ in range(start_sample, start_sample + nsamples):
         i = random.randint(0, trainenc.input_ids.shape[1] - seqlen - 1)
         j = i + seqlen
         inp = trainenc.input_ids[:, i:j]
@@ -32,7 +32,7 @@ def get_pile(nsamples, seed, seqlen, model):
     return trainloader, None
 
 
-def get_wikitext2(nsamples, seed, seqlen, model):
+def get_wikitext2(nsamples, start_sample, seed, seqlen, model):
     print("get_wikitext2")
     traindata = load_dataset('wikitext', 'wikitext-2-raw-v1', split='train')
     testdata = load_dataset('wikitext', 'wikitext-2-raw-v1', split='test')
@@ -44,7 +44,7 @@ def get_wikitext2(nsamples, seed, seqlen, model):
     
     random.seed(seed)
     trainloader = []
-    for _ in range(nsamples):
+    for _ in range(start_sample, start_sample + nsamples):
         i = random.randint(0, trainenc.input_ids.shape[1] - seqlen - 1)
         j = i + seqlen
         inp = trainenc.input_ids[:, i:j]
@@ -53,7 +53,7 @@ def get_wikitext2(nsamples, seed, seqlen, model):
         trainloader.append((inp, tar))
     return trainloader, testenc
 
-def get_ptb(nsamples, seed, seqlen, model):
+def get_ptb(nsamples, start_sample, seed, seqlen, model):
     print("get_ptb")
     traindata = load_dataset('ptb_text_only', 'penn_treebank', split='train')
     valdata = load_dataset('ptb_text_only', 'penn_treebank', split='validation')
@@ -66,7 +66,7 @@ def get_ptb(nsamples, seed, seqlen, model):
 
     random.seed(seed)
     trainloader = []
-    for _ in range(nsamples):
+    for _ in range(start_sample, start_sample + nsamples):
         i = random.randint(0, trainenc.input_ids.shape[1] - seqlen - 1)
         j = i + seqlen
         inp = trainenc.input_ids[:, i:j]
@@ -75,7 +75,7 @@ def get_ptb(nsamples, seed, seqlen, model):
         trainloader.append((inp, tar))
     return trainloader, testenc
 
-def get_c4(nsamples, seed, seqlen, model):
+def get_c4(nsamples, start_sample, seed, seqlen, model):
     print("get_c4")
     traindata = load_dataset(
         'allenai/c4', 'allenai--c4', data_files={'train': 'en/c4-train.00000-of-01024.json.gz'}, split='train'
@@ -89,7 +89,7 @@ def get_c4(nsamples, seed, seqlen, model):
 
     random.seed(seed)
     trainloader = []
-    for _ in range(nsamples):
+    for _ in range(start_sample, start_sample + nsamples):
         while True:
             i = random.randint(0, len(traindata) - 1)
             trainenc = tokenizer(traindata[i]['text'], return_tensors='pt')
@@ -117,7 +117,7 @@ def get_c4(nsamples, seed, seqlen, model):
 
     return trainloader, valenc 
 
-def get_ptb_new(nsamples, seed, seqlen, model):
+def get_ptb_new(nsamples, start_sample, seed, seqlen, model):
     print("get_ptb_new")
     traindata = load_dataset('ptb_text_only', 'penn_treebank', split='train')
     testdata  = load_dataset('ptb_text_only', 'penn_treebank', split='test')
@@ -130,7 +130,7 @@ def get_ptb_new(nsamples, seed, seqlen, model):
 
     random.seed(seed)
     trainloader = []
-    for _ in range(nsamples):
+    for _ in range(start_sample, start_sample + nsamples):
         i = random.randint(0, trainenc.input_ids.shape[1] - seqlen - 1)
         j = i + seqlen
         inp = trainenc.input_ids[:, i:j]
@@ -140,7 +140,7 @@ def get_ptb_new(nsamples, seed, seqlen, model):
     return trainloader, testenc
 
 
-def get_c4_new(nsamples, seed, seqlen, model):
+def get_c4_new(nsamples, start_sample, seed, seqlen, model):
     print("get_c4_new")
     traindata = load_dataset(
         'allenai/c4', 'allenai--c4', data_files={'train': 'en/c4-train.00000-of-01024.json.gz'}, split='train'
@@ -153,7 +153,7 @@ def get_c4_new(nsamples, seed, seqlen, model):
     
     random.seed(seed)
     trainloader = []
-    for _ in range(nsamples):
+    for _ in range(start_sample, start_sample + nsamples):
         while True:
             i = random.randint(0, len(traindata) - 1)
             trainenc = tokenizer(traindata[i]["text"], return_tensors="pt")
@@ -172,24 +172,24 @@ def get_c4_new(nsamples, seed, seqlen, model):
 
 
 def get_loaders(
-    name, nsamples=128, seed=0, seqlen=2048, model='',
+    name, nsamples=128, start_sample=0, seed=0, seqlen=2048, model='',
 ):
     if 'wikitext2' in name:
-        return get_wikitext2(nsamples, seed, seqlen, model)
+        return get_wikitext2(nsamples, start_sample, seed, seqlen, model)
     if 'pile' in name:
-        return get_pile(nsamples, seed, seqlen, model)
+        return get_pile(nsamples, start_sample, seed, seqlen, model)
     if 'ptb' in name:
         if 'new' in name:
-            return get_ptb_new(nsamples, seed, seqlen, model)  
-        return get_ptb(nsamples, seed, seqlen, model)
+            return get_ptb_new(nsamples, start_sample, seed, seqlen, model)
+        return get_ptb(nsamples, start_sample, seed, seqlen, model)
     if 'c4' in name:
         if 'new' in name:
-            return get_c4_new(nsamples, seed, seqlen, model)  
-        return get_c4(nsamples, seed, seqlen, model)
+            return get_c4_new(nsamples, start_sample, seed, seqlen, model)
+        return get_c4(nsamples, start_sample, seed, seqlen, model)
     if 'mix' in name:
-        wiki_train,wiki_val=get_wikitext2(nsamples//3, seed, seqlen, model)
-        ptb_train,ptb_val=get_ptb(nsamples//3, seed, seqlen, model)
-        c4_train,c4_val=get_c4(nsamples//3, seed, seqlen, model)
+        wiki_train,wiki_val=get_wikitext2(nsamples//3, start_sample, seed, seqlen, model)
+        ptb_train,ptb_val=get_ptb(nsamples//3, start_sample, seed, seqlen, model)
+        c4_train,c4_val=get_c4(nsamples//3, start_sample, seed, seqlen, model)
         train=wiki_train+ptb_train+c4_train
         val=None
         return train,val

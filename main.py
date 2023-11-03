@@ -186,6 +186,7 @@ def main():
         help="Where to extract calibration data from.",
     )
     parser.add_argument("--nsamples", type=int, default=128, help="Number of calibration data samples.")
+    parser.add_argument("--start_sample", type=int, default=0)
     parser.add_argument("--batch_size", type=int, default=1, help="batch size.")
     parser.add_argument("--seed", type=int, default=2, help="Seed for sampling the calibration data.")
     parser.add_argument("--tasks", default="")
@@ -244,13 +245,14 @@ def main():
     tick = time.time() 
     
     # load calibration dataset
-    cache_dataloader = f'{args.cache_dir}/dataloader_{args.model_family}_{args.calib_dataset}_{args.nsamples}.cache'
+    cache_dataloader = f'{args.cache_dir}/dataloader_{args.model_family}_{args.calib_dataset}_{args.nsamples}_{args.start_sample}.cache'
     if os.path.exists(cache_dataloader):
         dataloader = torch.load(cache_dataloader)
         logger.info(f"load calibration from {cache_dataloader}")
     else:
         dataloader, _ = get_loaders(
             args.calib_dataset,
+            start_sample=args.start_sample,
             nsamples=args.nsamples,
             seed=args.seed,
             model=args.model,

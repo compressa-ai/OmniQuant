@@ -370,7 +370,8 @@ class QuantLlamaDecoderLayer(nn.Module):
         if destination is None:
             destination = OrderedDict()
         for name, param in self.named_parameters():
-            if name.find('smooth') > -1 or name.find('bound_factor') > -1:
+            if name.find('smooth') > -1 or name.find('bound_factor') > -1\
+                    or name.find('alpha') > -1 or name.find('num_iters') > -1:
                 destination[prefix + name] = param if keep_vars else param.detach()
         return destination
     

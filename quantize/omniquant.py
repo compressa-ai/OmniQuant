@@ -177,6 +177,8 @@ def omniquant(
                             qlayer.register_parameter(f"{pairs[key]}_smooth_scale",torch.nn.Parameter(scale))
                                 
         if args.resume:
+            print(f'Loading params: {omni_parameters[i].keys()}')
+
             qlayer.load_state_dict(omni_parameters[i], strict=False)
         
         if args.epochs > 0:
@@ -195,8 +197,13 @@ def omniquant(
                  {'params':lwc_params,'lr':args.lwc_lr}],
                 weight_decay=args.wd)
             loss_scaler = utils.NativeScalerWithGradNormCount()
+            scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(
+                optimizer, T_max=args.epochs
+            )
             
             for epochs in range(args.epochs):
+                print(f'!!! LR before: {scheduler.get_last_lr()}.')
+
                 loss_list = []
                 norm_list = []
                 for j in range(args.nsamples//args.batch_size):    
@@ -214,8 +221,12 @@ def omniquant(
                         
                     loss_list.append(loss.data)
                     optimizer.zero_grad()
-                    norm = loss_scaler(loss, optimizer,parameters=qlayer.omni_parameters(use_shift))
+                    norm = loss_scaler(loss, optimizer, parameters=qlayer.omni_parameters(use_shift))
                     norm_list.append(norm.data)
+
+                scheduler.step()
+
+                print(f'!!! LR after: {scheduler.get_last_lr()}.')
 
                 loss_mean = torch.stack(loss_list).mean()
                 norm_mean = torch.stack(norm_list).mean()

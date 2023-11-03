@@ -94,7 +94,8 @@ class UniformAffineQuantizer(nn.Module):
         self.hard_freq = hard_freq
         self.round_mode = 'learned_hard_sigmoid'
 
-        print(f'AdaRound params: delta_round={self.delta_round}, delta_range={self.delta_range}, hard_freq={self.hard_freq}')
+        if self.adaround_adaquant:
+            print(f'AdaRound params: delta_round={self.delta_round}, delta_range={self.delta_range}, hard_freq={self.hard_freq}')
 
         if shape is not None:
             self.alpha = torch.nn.Parameter(
@@ -199,11 +200,13 @@ class UniformAffineQuantizer(nn.Module):
             dim1, dim2 = x.shape
             x = x.reshape(-1, self.group_size)
 
-        if self.alpha is not None:
+        if self.adaround_adaquant and self.alpha is not None:
             x_dequant = self.adaround_forward(
                 x, scale, round_zero_point, hard_value=hard
             )
         else:
+            assert not self.adaround_adaquant
+
             x_int = round_ste(x / scale)
             if round_zero_point is not None:
                 x_int = x_int.add(round_zero_point)

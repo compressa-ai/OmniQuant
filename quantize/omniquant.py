@@ -177,7 +177,7 @@ def omniquant(
                             qlayer.register_parameter(f"{pairs[key]}_smooth_scale",torch.nn.Parameter(scale))
                                 
         if args.resume:
-            print(f'Loading params: {omni_parameters[i].keys()}')
+            print(f'Loading params: {omni_parameters[i].keys()}.')
 
             qlayer.load_state_dict(omni_parameters[i], strict=False)
         
@@ -244,8 +244,12 @@ def omniquant(
                         quant_inps[j] = qlayer(quant_inps[j].unsqueeze(0), attention_mask=attention_mask,position_ids=position_ids)[0]
             qlayer.half()
             layers[i] = qlayer.to("cpu")
-            omni_parameters[i] = qlayer.omni_state_dict()
-            torch.save(omni_parameters, os.path.join(args.output_dir, f'omni_parameters.pth'))
+
+            if not args.no_save_params:
+                print(f'Saving params: {i}.')
+
+                omni_parameters[i] = qlayer.omni_state_dict()
+                torch.save(omni_parameters, os.path.join(args.output_dir, f'omni_parameters.pth'))
         else:
             qlayer.half()
             layers[i] = qlayer.to("cpu")

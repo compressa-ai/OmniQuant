@@ -31,7 +31,8 @@ class UniformAffineQuantizer(nn.Module):
         dynamic_method="per_cluster",
         group_size=None,
         shape=None,
-        lwc=False
+        lwc=False,
+        adaround=False,
     ):
         """
         support cluster quantize
@@ -58,17 +59,24 @@ class UniformAffineQuantizer(nn.Module):
         self.dynamic_method = dynamic_method
         self.deficiency = 0
         self.lwc = lwc
+        self.adaround = adaround
         
         init_value = 4.             # inti value of learnable weight clipping
-        if lwc:
+        if shape is not None:
             if group_size:
                 dim1 = int(shape[0]*math.ceil(shape[1]/group_size))
+                dim2 = shape[0] * shape[1] // dim1
                 self.deficiency = shape[-1]%group_size
                 if self.deficiency > 0:
                     self.deficiency = group_size - self.deficiency
                     assert self.symmetric   # support for mlc-llm symmetric quantization
             else:
                 dim1 = shape[0]
+                dim2 = shape[1]
+
+            assert dim1 * dim2 == shape[0] * shape[1]
+
+        if lwc:
             self.upbound_factor = nn.Parameter(torch.ones((dim1,1)).cuda()*init_value)
             self.lowbound_factor = nn.Parameter(torch.ones((dim1,1)).cuda()*init_value)
         self.sigmoid = nn.Sigmoid()
@@ -76,12 +84,63 @@ class UniformAffineQuantizer(nn.Module):
         self.enable = True
         self.group_size = group_size
 
+        # AdaRound
+        self.gamma, self.zeta = -0.1, 1.1
+
+        if self.adaround:
+            print('Have alpha for AdaRound weight quantization!')
+            self.alpha = torch.nn.Parameter(
+                torch.ones(dim1, dim2).cuda()
+            )
+        else:
+            self.alpha = None
+
+        self.num_iters = torch.nn.Parameter(
+            torch.tensor([0]), requires_grad=False
+        )
+
     def change_n_bits(self, n_bits):
         self.n_bits = n_bits
         self.qmin = 0
         self.qmax = 2 ** (n_bits) - 1
 
-    def fake_quant(self, x, scale, round_zero_point):
+    def init_alpha(self, x: torch.Tensor, scale, zero_point):
+        scale = scale.data
+        x_floor = torch.floor(x / scale)
+
+        rest = (x / scale) - x_floor  # rest of rounding [0, 1)
+        alpha = -torch.log((self.zeta - self.gamma) / (rest - self.gamma) - 1)  # => sigmoid(alpha) = rest
+
+        with torch.no_grad():
+            self.alpha.data = alpha
+
+    def rectified_sigmoid(self):
+        """generate rounding mask.
+        """
+        return ((self.zeta - self.gamma) * torch.sigmoid(self.alpha) + self.gamma).clamp(0, 1)
+
+    def adaround_forward(self, X, scale, zero_point, hard=False):
+        if self.num_iters == 0:
+            self.init_alpha(X.data.clone().detach(), scale, zero_point)
+
+        scale = scale.data
+        zero_point = zero_point.data
+
+        X = torch.floor(X / scale)
+
+        if hard:
+            print('!!! Hard AdaRound !!!')
+            X += (self.alpha >= 0).float()
+        else:
+            X += self.rectified_sigmoid()
+
+        X += zero_point
+        X = torch.clamp(X, self.qmin, self.qmax)
+        X = (X - zero_point) * scale
+
+        return X
+
+    def fake_quant(self, x, scale, round_zero_point, hard):
         if self.deficiency > 0:
             pad_zeros = torch.zeros((x.shape[0],self.deficiency),dtype=x.dtype,device=x.device)
             x = torch.cat((x,pad_zeros),dim=1)
@@ -90,22 +149,28 @@ class UniformAffineQuantizer(nn.Module):
             assert len(x.shape)==2, "only support linear layer now"
             dim1, dim2 = x.shape
             x = x.reshape(-1, self.group_size)
-        x_int = round_ste(x / scale)
-        if round_zero_point is not None:
-            x_int = x_int.add(round_zero_point)
-        x_int = x_int.clamp(self.qmin, self.qmax)
-        x_dequant = x_int
-        if round_zero_point is not None:
-            x_dequant = x_dequant.sub(round_zero_point)
-        x_dequant = x_dequant.mul(scale)
+
+        if self.adaround:
+            x_dequant = self.adaround_forward(
+                x, scale, round_zero_point, hard=hard
+            )
+        else:
+            x_int = round_ste(x / scale)
+            if round_zero_point is not None:
+                x_int = x_int.add(round_zero_point)
+            x_int = x_int.clamp(self.qmin, self.qmax)
+            x_dequant = x_int
+            if round_zero_point is not None:
+                x_dequant = x_dequant.sub(round_zero_point)
+            x_dequant = x_dequant.mul(scale)
+
         if self.group_size:
             x_dequant = x_dequant.reshape(dim1, dim2)
         if self.deficiency > 0:
             x_dequant = x_dequant[:,:-self.deficiency]
         return x_dequant
-    
 
-    def forward(self, x: torch.Tensor):
+    def forward(self, x: torch.Tensor, hard=None):
         if self.n_bits >= 16 or not self.enable:
             return x
         if self.metric == "fix0to1":
@@ -116,7 +181,11 @@ class UniformAffineQuantizer(nn.Module):
         else:
             raise NotImplementedError()   
 
-        x_dequant = self.fake_quant(x, self.scale, self.round_zero_point)
+        x_dequant = self.fake_quant(
+            x, self.scale, self.round_zero_point, hard=hard
+        )
+        self.num_iters += 1
+
         return x_dequant
 
     def per_token_dynamic_calibration(self, x):

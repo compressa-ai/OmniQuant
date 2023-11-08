@@ -219,6 +219,7 @@ def main():
     parser.add_argument("--epochs", type=int, default=10)
     parser.add_argument("--let",default=False, action="store_true",help="activate learnable equivalent transformation")
     parser.add_argument("--lwc",default=False, action="store_true",help="activate learnable weight clipping")
+    parser.add_argument("--adaround", default=False, action="store_true", help="AdaRound")
     parser.add_argument("--aug_loss", default=False, action="store_true", help="calculate additional loss with same input")
     parser.add_argument("--symmetric",default=False, action="store_true", help="symmetric quantization")
     parser.add_argument("--a_dynamic_method", type=str, default="per_token", choices=["per_token"])
@@ -280,7 +281,8 @@ def main():
         "symmetric": args.symmetric,
         "dynamic_method": args.w_dynamic_method,
         "group_size": args.group_size,
-        "lwc":args.lwc
+        "lwc": args.lwc,
+        "adaround": args.adaround,
     }
     args.act_quant_params = {
         "n_bits":  args.abits,
@@ -361,6 +363,7 @@ def main():
         # delete omni parameters
         for name, module in lm.model.named_modules():
             if isinstance(module, QuantLinear):
+                del module.weight_quantizer.alpha
                 del module.weight_quantizer.lowbound_factor
                 del module.weight_quantizer.upbound_factor
             if isinstance(module,QuantLlamaDecoderLayer) or isinstance(module,QuantOPTDecoderLayer):

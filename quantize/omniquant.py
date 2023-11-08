@@ -245,15 +245,24 @@ def omniquant(
 
             let_params = qlayer.let_parameters(use_shift)
             lwc_params = qlayer.lwc_parameters()
-            ada_params = qlayer.ada_parameters()
+            alpha_params = qlayer.alpha_parameters()
+            dweight_params = qlayer.dweight_parameters()
+
+            params = list()
+
+            if args.let:
+                params.append({"params": lwc_params, "lr": args.lwc_lr})
+            if args.lwc:
+                params.append({"params": lwc_params, "lr": args.lwc_lr})
+
+            if args.adaround or args.adaqround:
+                params.append({"params": alpha_params, "lr": args.alpha_lr})
+            elif args.adaquant:
+                params.append({"params": alpha_params, "lr": args.alpha_lr})
+                params.append({"params": dweight_params, "lr": args.dweight_lr})
 
             # create optimizer
-            optimizer = torch.optim.AdamW(
-                [{"params": let_params, "lr": args.let_lr},
-                 {"params": lwc_params, "lr": args.lwc_lr},
-                 {"params": ada_params, "lr": args.ada_lr}],
-                weight_decay=args.wd
-            )
+            optimizer = torch.optim.AdamW(params, weight_decay=args.wd)
 
             if args.use_lr_scheduler:
                 scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(

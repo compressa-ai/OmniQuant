@@ -221,13 +221,15 @@ def main():
     parser.add_argument("--use_lr_scheduler", default=False, action="store_true", help="Use cosine annealing LR scheduler.")
     parser.add_argument("--let_lr", type=float, default=5e-3)
     parser.add_argument("--lwc_lr", type=float, default=1e-2)
-    parser.add_argument("--ada_lr", type=float, default=1e-2)
+    parser.add_argument("--alpha_lr", type=float, default=1e-2, help="AdaRound: 1e-2, AdaQuant: 1e-3.")
+    parser.add_argument("--dweight_lr", type=float, default=1e-5)
     parser.add_argument("--wd", type=float, default=0)
     parser.add_argument("--epochs", type=int, default=10)
     parser.add_argument("--let",default=False, action="store_true",help="activate learnable equivalent transformation")
     parser.add_argument("--lwc",default=False, action="store_true",help="activate learnable weight clipping")
     parser.add_argument("--adaround", default=False, action="store_true", help="AdaRound")
     parser.add_argument("--adaqround", default=False, action="store_true", help="AdaRound v2")
+    parser.add_argument("--adaquant", default=False, action="store_true", help="AdaQuant")
     parser.add_argument("--delta_round", type=int, default=1, help="Determines delta range for AdaRound v2 (vanilla AdaRound means delta_round = 0).")
     parser.add_argument("--hard_freq", type=int, default=3, help="Num times out of ten for hard AdaRound v2 quantization during training.")
     parser.add_argument("--no_ord_loss", default=False, action="store_true", help="No ordinary omniquant loss.")
@@ -295,6 +297,7 @@ def main():
         "lwc": args.lwc,
         "adaround": args.adaround,
         "adaqround": args.adaqround,
+        "adaquant": args.adaquant,
         "delta_round": args.delta_round,
         "hard_freq": args.hard_freq,
     }
@@ -379,6 +382,7 @@ def main():
         for name, module in lm.model.named_modules():
             if isinstance(module, QuantLinear):
                 del module.weight_quantizer.alpha
+                del module.weight_quantizer.dweight
                 del module.weight_quantizer.lowbound_factor
                 del module.weight_quantizer.upbound_factor
             if isinstance(module,QuantLlamaDecoderLayer) or isinstance(module,QuantOPTDecoderLayer):

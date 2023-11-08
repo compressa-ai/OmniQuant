@@ -360,7 +360,7 @@ class QuantLlamaDecoderLayer(nn.Module):
 
         return iter(params)  
 
-    def ada_parameters(self):
+    def alpha_parameters(self):
         params = []
         names = []
 
@@ -369,7 +369,20 @@ class QuantLlamaDecoderLayer(nn.Module):
                 params.append(m)
                 names.append(n)
 
-        print(f'!!! Ada params: {names}.')
+        print(f'!!! Alpha params: {names}.')
+
+        return iter(params)
+
+    def dweight_parameters(self):
+        params = []
+        names = []
+
+        for n, m in self.named_parameters():
+            if n.find('dweight') > -1:
+                params.append(m)
+                names.append(n)
+
+        print(f'!!! Delta weight params: {names}.')
 
         return iter(params)
 

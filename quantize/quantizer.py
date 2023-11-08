@@ -119,7 +119,7 @@ class UniformAffineQuantizer(nn.Module):
             x = x.reshape(-1, self.group_size)
 
         x_int = round_ste(
-            (x + self.perturb) / scale
+            (0.5 * x + self.perturb) / scale
         )
 
         if round_zero_point is not None:
@@ -178,6 +178,9 @@ class UniformAffineQuantizer(nn.Module):
         if self.num_iters == 0:
             print(f'!!! Initializing alpha...')
 
+            with torch.no_grad():
+                self.perturb.data = 0.5 * x
+
             quantization_errors = list()
             range = xmax - xmin
             alphas = torch.linspace(0.6, 1, steps=100)
@@ -206,9 +209,9 @@ class UniformAffineQuantizer(nn.Module):
 
             with torch.no_grad():
                 self.alpha.data = best_alpha * range
-                self.perturb.data = (
-                    self._perturb_coeff * torch.randn(*self.perturb.shape).cuda()
-                )
+                # self.perturb.data = (
+                #     self._perturb_coeff * torch.randn(*self.perturb.shape).cuda()
+                # )
 
         scale = self.alpha / (2**self.n_bits-1)
         self.scale = scale.clamp(min=CLIPMIN, max=1e4)

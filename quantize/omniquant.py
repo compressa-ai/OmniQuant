@@ -8,6 +8,195 @@ import math
 import utils
 import os
 import pdb
+import shutil
+
+
+
+class Inps:
+    def __init__(
+            self, name, folder,
+            nsamples, seqlen, hidden_size,
+            dtype, device, nsamples_in_memory=128, batch_size=1):
+
+        if nsamples % nsamples_in_memory != 0:
+            raise ValueError(
+                'Please make sure `nsamples` is divisible by `nsamples_in_memory` without a remainder.'
+            )
+
+        self.name = name
+        self._folder = folder
+        self.folder = os.path.join(self._folder, name)
+
+        self.nsamples_total = nsamples
+        self.nsamples_buffer = nsamples_in_memory
+        self.seqlen = seqlen
+        self.hidden_size = hidden_size
+        self.dtype = dtype
+        self.device = device
+
+        self.batch_size = batch_size
+
+        self._buffer_count = 0
+        self.inps = self._load()
+
+    def deepcopy(self, name, folder):
+        self._save()
+
+        destination_folder = os.path.join(folder, name)  # TODO: DRY
+        print(f'Copy tensors to: {destination_folder}.')
+
+        if os.path.isdir(destination_folder):
+            shutil.rmtree(destination_folder)
+
+        shutil.copytree(self.folder, destination_folder)
+
+        assert len(os.listdir(destination_folder)) == len(os.listdir(self.folder))
+
+        result = Inps(
+            name=name, folder=folder,
+            nsamples=self.nsamples_total, seqlen=self.seqlen,
+            hidden_size=self.hidden_size,
+            dtype=self.dtype, device=self.device,
+            nsamples_in_memory=self.nsamples_buffer, batch_size=self.batch_size
+        )
+        result.inps = result._load(self._buffer_count)
+
+        return result
+
+    def __len__(self):
+        return self.nsamples_total
+
+    def __setitem__(self, key, value):
+        low = self._buffer_count * self.nsamples_buffer
+        high = (self._buffer_count + 1) * self.nsamples_buffer
+
+        if low <= key < high:
+            self.inps[key % self.nsamples_buffer] = value
+            # self._save()
+
+            return
+
+        if key >= high:
+            self._save()
+            self.inps = self._load_next()
+        elif key < low:
+            # TODO: assuming we start from zero
+            # assert key == 0, f'{key} != {low} (high = {high})'
+
+            self._save()
+            self._buffer_count = -1
+            self.inps = self._load_next()
+        else:
+            assert False
+
+        self[key] = value
+
+    def __getitem__(self, key):
+        low = self._buffer_count * self.nsamples_buffer
+        high = (self._buffer_count + 1) * self.nsamples_buffer
+
+        # https://stackoverflow.com/a/9951672/8094251
+        if isinstance(key, slice):
+            start, stop, step = key.indices(len(self))
+
+            # TODO: DRY
+            if low <= start < high:
+                is_stop_bigger = stop > start
+                start = start % self.nsamples_buffer
+                stop = stop % self.nsamples_buffer
+
+                if is_stop_bigger and stop <= start:
+                    stop = self.nsamples_buffer
+
+                    assert stop > start
+
+                return self.inps[start:stop:step]
+
+            if start >= high:
+                self._save()
+                self.inps = self._load_next()
+            elif start < low:
+                # TODO: assuming we start from zero
+                # assert key == 0
+
+                self._save()
+                self._buffer_count = -1
+                self.inps = self._load_next()
+            else:
+                assert False
+
+            return self[key]
+
+        if low <= key < high:
+            return self.inps[key % self.nsamples_buffer]
+
+        if key >= high:
+            self._save()
+            self.inps = self._load_next()
+        elif key < low:
+            # TODO: assuming we start from zero
+            # assert key == 0
+
+            self._save()
+            self._buffer_count = -1
+            self.inps = self._load_next()
+        else:
+            assert False
+
+        return self[key]
+
+    def _init(self):
+        return torch.zeros(
+            (self.nsamples_buffer, self.seqlen, self.hidden_size),
+            dtype=self.dtype, device=self.device
+        )
+
+    def _get_file_path(self, i=None):
+        if i is None:
+            i = self._buffer_count
+
+        return os.path.join(self.folder, f'{i}.pt')
+
+    def _save(self):
+        os.makedirs(self.folder, exist_ok=True)
+        file_path = self._get_file_path()
+
+        with open(file_path, 'wb') as f:
+            torch.save(self.inps, f)
+
+    def _load(self, buffer=0):
+        print(f'!!! Loading tensor number {buffer} for "{self.name}"...')
+
+        self._buffer_count = buffer
+
+        if not os.path.isdir(self.folder):
+            print(f'No save folder "{self.folder}"'
+                  f' found for inps "{self.name}"'
+                  f' (count {buffer}).'
+                  f' Returning zeros.')
+
+            return self._init()
+
+        file_path = self._get_file_path(buffer)
+
+        if not os.path.isfile(file_path):
+            print(f'No saved tensor file "{file_path}"'
+                  f' found for inps "{self.name}"'
+                  f' (count {buffer}).'
+                  f' Returning zeros.')
+
+            return self._init()
+
+        with open(file_path, 'rb') as f:
+            result = torch.load(f, map_location=self.device)
+
+        assert result.dtype == self.dtype, f'{self.dtype}, {result.dtype}'
+        # assert result.device == self.device, f'{self.device}, {result.device}'
+
+        return result
+
+    def _load_next(self):
+        return self._load(self._buffer_count + 1)
 
 
 
@@ -64,8 +253,15 @@ def omniquant(
     layers[0] = layers[0].to(dev)
     dtype = next(iter(model.parameters())).dtype
     inps = torch.zeros(
-        (args.nsamples, lm.seqlen, model.config.hidden_size), dtype=dtype, device=dev
+        (args.nsamples, lm.seqlen, model.config.hidden_size),
+        dtype=dtype, device='cpu'  # dev
     )
+    # inps = Inps(
+    #     name='inps', folder=args.samples_dir,
+    #     nsamples=args.nsamples, seqlen=lm.seqlen,
+    #     hidden_size=model.config.hidden_size,
+    #     dtype=dtype, device=dev
+    # )
     cache = {"i": 0}
 
     # catch the first layer input
@@ -85,6 +281,8 @@ def omniquant(
 
     layers[0] = Catcher(layers[0])
     layers[0].is_llama = is_llama
+
+    print(f'!!! Num batches total: {len(dataloader)}.')
 
     with torch.no_grad():
         for batch in dataloader:
@@ -117,7 +315,19 @@ def omniquant(
     quant_inps = inps
     fp_inps = copy.deepcopy(inps)   # take output of fp model as input
     fp_inps_2 = copy.deepcopy(inps) if args.aug_loss else None # take output of quantization model as input
-    
+    # fp_inps = inps.deepcopy(name='fp_inps',
+    #                         folder=args.samples_dir) if not args.no_ord_loss else None  # take output of fp model as input
+    # fp_inps_2 = inps.deepcopy(name='fp_inps_2',
+    #                           folder=args.samples_dir) if args.aug_loss else None  # take output of quantization model as input
+
+    # print(inps)
+    # print(fp_inps)
+    # print(fp_inps_2)
+
+    # print(inps.inps, inps._buffer_count)
+    # print(fp_inps.inps, fp_inps._buffer_count)
+    # print(fp_inps_2)
+
     attention_mask = cache["attention_mask"]
     attention_mask_batch = attention_mask.repeat(args.batch_size,1,1,1)
     loss_func = torch.nn.MSELoss()
@@ -147,9 +357,18 @@ def omniquant(
             with torch.no_grad():
                 with torch.cuda.amp.autocast():
                     for j in range(args.nsamples):
-                        fp_inps[j] = qlayer(fp_inps[j].unsqueeze(0), attention_mask=attention_mask,position_ids=position_ids)[0]
+                        if not args.no_ord_loss:
+                            fp_inps[j] = qlayer(
+                                fp_inps[j].unsqueeze(0).to(dev),
+                                attention_mask=attention_mask,
+                                position_ids=position_ids
+                            )[0].to('cpu')
                         if args.aug_loss:
-                            fp_inps_2[j] = qlayer(quant_inps[j].unsqueeze(0), attention_mask=attention_mask,position_ids=position_ids)[0]
+                            fp_inps_2[j] = qlayer(
+                                quant_inps[j].unsqueeze(0).to(dev),
+                                attention_mask=attention_mask,
+                                position_ids=position_ids
+                            )[0].to('cpu')
 
         # init smooth parameters
         qlayer.set_quant_state(weight_quant=False, act_quant=True)  # weight will be manually quantized before forward
@@ -197,11 +416,19 @@ def omniquant(
                  {'params':lwc_params,'lr':args.lwc_lr}],
                 weight_decay=args.wd)
             loss_scaler = utils.NativeScalerWithGradNormCount()
+            # scheduler = torch.optim.lr_scheduler.LinearLR(
+            #     optimizer, start_factor=0.01
+            # )
             scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(
                 optimizer, T_max=args.epochs
             )
             
             for epochs in range(args.epochs):
+                # if epochs == 5:
+                #     scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(
+                #         optimizer, T_max=args.epochs - 5
+                #     )
+
                 print(f'!!! LR before: {scheduler.get_last_lr()}.')
 
                 loss_list = []
@@ -211,10 +438,16 @@ def omniquant(
                     # obtain output of quantization model
                     with torch.cuda.amp.autocast():
                         qlayer.smooth_and_quant_temporary()
-                        quant_out = qlayer(quant_inps[index:index+args.batch_size,], attention_mask=attention_mask_batch,position_ids=position_ids)[0]
-                        loss = loss_func(fp_inps[index:index+args.batch_size,], quant_out)
+                        quant_out = qlayer(quant_inps[index:index + args.batch_size].to(dev),
+                                           attention_mask=attention_mask_batch,
+                                           position_ids=position_ids)[0]
+                        loss1 = loss2 = 0
+                        if not args.no_ord_loss:
+                            loss1 = loss_func(fp_inps[index:index + args.batch_size].to(dev), quant_out)
                         if args.aug_loss:
-                            loss += loss_func(fp_inps_2[index:index+args.batch_size,], quant_out)
+                            loss2 = loss_func(fp_inps_2[index:index + args.batch_size].to(dev), quant_out)
+                        loss = loss1 + loss2
+
                     if not math.isfinite(loss.item()):
                         logger.info("Loss is NAN, stopping training")
                         pdb.set_trace()
@@ -241,7 +474,11 @@ def omniquant(
             with torch.no_grad():
                 with torch.cuda.amp.autocast():
                     for j in range(args.nsamples):
-                        quant_inps[j] = qlayer(quant_inps[j].unsqueeze(0), attention_mask=attention_mask,position_ids=position_ids)[0]
+                        quant_inps[j] = qlayer(
+                            quant_inps[j].unsqueeze(0).to(dev),
+                            attention_mask=attention_mask,
+                            position_ids=position_ids
+                        )[0].to('cpu')
             qlayer.half()
             layers[i] = qlayer.to("cpu")
 

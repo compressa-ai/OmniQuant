@@ -20,6 +20,7 @@ except ImportError:
 
 # import pdb
 
+from awq.quantize.pre_quant import apply_awq
 
 
 def get_act_scales(model, dataloader, num_samples=128):
@@ -96,10 +97,17 @@ def get_act_shifts(model, dataloader, num_samples=128):
 
 
 
-def build_model_and_tokenizer(model_name):
+def build_model_and_tokenizer(model_name, load_awq):
     kwargs = {"torch_dtype": torch.float16, "device_map": "auto"}
-    tokenizer = AutoTokenizer.from_pretrained(model_name)
+    tokenizer = AutoTokenizer.from_pretrained(model_name, use_fast=False)
     model = AutoModelForCausalLM.from_pretrained(model_name, **kwargs)
+
+    if load_awq is not None:
+        print('Loading awq...')
+
+        awq_results = torch.load(load_awq, map_location="cpu")
+        apply_awq(model, awq_results)
+
     return model, tokenizer
 
 def parse_args():
@@ -113,6 +121,8 @@ def parse_args():
     parser.add_argument("--calib_dataset",type=str,default="wikitext2",
         choices=["wikitext2", "ptb", "c4", "mix","pile"],
         help="Where to extract calibration data from.",)
+    parser.add_argument('--load_awq', type=str, default=None,
+                        help="Path to the awq search results.")
     parser.add_argument('--num-samples', type=int, default=128)
     parser.add_argument('--seq-len', type=int, default=2048)
     parser.add_argument("--seed", type=int, default=2, help="Seed for sampling the calibration data.")
@@ -123,13 +133,15 @@ def parse_args():
 @torch.no_grad()
 def main():
     args = parse_args()
-    model, tokenizer = build_model_and_tokenizer(args.model)
+    model, tokenizer = build_model_and_tokenizer(
+        args.model, args.load_awq
+    )
     dataloader, _ = get_loaders(
-    args.calib_dataset,
-    nsamples=args.num_samples,
-    seed=args.seed,
-    model=args.model,
-    seqlen=args.seq_len,
+        args.calib_dataset,
+        nsamples=args.num_samples,
+        seed=args.seed,
+        model=args.model,
+        seqlen=args.seq_len,
     )
     
     args.net = args.model.split('/')[-1]

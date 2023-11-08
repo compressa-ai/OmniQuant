@@ -26,6 +26,8 @@ except ImportError:
 
 import pdb
 
+from awq.quantize.pre_quant import apply_awq
+
 
 torch.backends.cudnn.benchmark = True
 
@@ -227,6 +229,8 @@ def main():
     parser.add_argument("--net", type=str, default=None, choices=net_choices)
     parser.add_argument("--act-scales", type=str, default=None)
     parser.add_argument("--act-shifts", type=str, default=None)
+    parser.add_argument('--load_awq', type=str, default=None,
+                        help="Path to the awq search results.")
 
     args = parser.parse_args()
     random.seed(args.seed)
@@ -258,12 +262,17 @@ def main():
     # assert args.net in net_choices
     args.model_family = args.net.split('-')[0]
     lm = LMClass(args)
+
+    if args.load_awq:
+        print('Loading awq...')
+
+        awq_results = torch.load(args.load_awq, map_location="cuda")
+        apply_awq(lm.model, awq_results)
+
     lm.seqlen = 2048
     lm.model.eval()
     for param in lm.model.parameters():
         param.requires_grad = False
-
-    
 
     args.weight_quant_params = {
         "n_bits": args.wbits,
@@ -312,6 +321,9 @@ def main():
         args.act_scales = f'./act_scales/{args.net}.pt'
     if args.act_shifts is None:
         args.act_shifts = f'./act_shifts/{args.net}.pt'
+
+    print(f'Loading act scales from {args.act_scales}.')
+    print(f'Loading act shifts from {args.act_shifts}.')
 
     # quantization
     if args.wbits < 16 or args.abits <16:

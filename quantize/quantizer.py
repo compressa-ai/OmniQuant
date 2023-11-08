@@ -33,6 +33,9 @@ class UniformAffineQuantizer(nn.Module):
         shape=None,
         lwc=False,
         adaround=False,
+        adaqround=False,
+        delta_round=0,
+        hard_freq=0,
     ):
         """
         support cluster quantize
@@ -60,6 +63,8 @@ class UniformAffineQuantizer(nn.Module):
         self.deficiency = 0
         self.lwc = lwc
         self.adaround = adaround
+        self.adaqround = adaqround
+        self.ada = self.adaround or self.adaqround
         
         init_value = 4.             # inti value of learnable weight clipping
         if shape is not None:
@@ -85,9 +90,17 @@ class UniformAffineQuantizer(nn.Module):
         self.group_size = group_size
 
         # AdaRound
-        self.gamma, self.zeta = -0.1, 1.1
+        self.delta_round = delta_round
+        self.delta_range = 2 * self.delta_round + 1
+        self.gamma, self.zeta = -0.1, self.delta_range + 0.1
+        self.hard_freq = hard_freq
 
         if self.adaround:
+            assert self.delta_round == 0
+            assert self.delta_range == 1
+            assert self.hard_freq == 0
+
+        if self.ada:
             print('Have alpha for AdaRound weight quantization!')
             self.alpha = torch.nn.Parameter(
                 torch.ones(dim1, dim2).cuda()
@@ -117,7 +130,8 @@ class UniformAffineQuantizer(nn.Module):
     def rectified_sigmoid(self):
         """generate rounding mask.
         """
-        return ((self.zeta - self.gamma) * torch.sigmoid(self.alpha) + self.gamma).clamp(0, 1)
+        return ((self.zeta - self.gamma) * torch.sigmoid(self.alpha)
+                + self.gamma).clamp(0, self.delta_range)
 
     def adaround_forward(self, X, scale, zero_point, hard=False):
         if self.num_iters == 0:
@@ -126,13 +140,18 @@ class UniformAffineQuantizer(nn.Module):
         scale = scale.data
         zero_point = zero_point.data
 
-        X = torch.floor(X / scale)
+        X = torch.floor(X / scale) - self.delta_round
 
-        if hard:
+        if hard and self.adaround:
             print('!!! Hard AdaRound !!!')
             X += (self.alpha >= 0).float()
-        else:
+        elif hard and self.adaqround:
+            print('!!! Hard AdaQRound !!!')
+            X += round_ste(self.rectified_sigmoid())
+        elif self.adaround or np.random.randint(0, 10) < 10 - self.hard_freq:
             X += self.rectified_sigmoid()
+        else:
+            X += round_ste(self.rectified_sigmoid())
 
         X += zero_point
         X = torch.clamp(X, self.qmin, self.qmax)
@@ -150,7 +169,7 @@ class UniformAffineQuantizer(nn.Module):
             dim1, dim2 = x.shape
             x = x.reshape(-1, self.group_size)
 
-        if self.adaround:
+        if self.ada:
             x_dequant = self.adaround_forward(
                 x, scale, round_zero_point, hard=hard
             )

@@ -352,7 +352,7 @@ class QuantLlamaDecoderLayer(nn.Module):
         names = []
 
         for n, m in self.named_parameters():
-            if n.find('bound_factor') > -1 or n.find('alpha') > -1:
+            if n.find('bound_factor') > -1:
                 params.append(m)
                 names.append(n)
 
@@ -360,13 +360,27 @@ class QuantLlamaDecoderLayer(nn.Module):
 
         return iter(params)  
 
+    def ada_parameters(self):
+        params = []
+        names = []
+
+        for n, m in self.named_parameters():
+            if n.find('alpha') > -1:
+                params.append(m)
+                names.append(n)
+
+        print(f'!!! Ada params: {names}.')
+
+        return iter(params)
+
     def omni_parameters(self, use_shift=True):
         params = []
         template = "smooth" if use_shift else "smooth_scale"
         for n, m in self.named_parameters():
             if (n.find('bound_factor') > -1
                     or n.find('alpha') > -1
-                    or n.find(template) > -1):
+                    or n.find(template) > -1
+                    or n.find('num_iters') > -1):
                 params.append(m)
         return iter(params)  
     
@@ -376,7 +390,8 @@ class QuantLlamaDecoderLayer(nn.Module):
         for name, param in self.named_parameters():
             if (name.find('smooth') > -1
                     or name.find('bound_factor') > -1
-                    or name.find('alpha') > -1):
+                    or name.find('alpha') > -1
+                    or name.find('num_iters') > -1):
                 destination[prefix + name] = param if keep_vars else param.detach()
         return destination
     

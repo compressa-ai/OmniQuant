@@ -197,6 +197,7 @@ def main():
     parser.add_argument("--cache_dir", default="./cache", type=str, help="cache dir of dataset, leading to faster debug")
     parser.add_argument("--output_dir", default="../log/", type=str, help="direction of logging file")
     parser.add_argument("--save_dir", default=None, type=str, help="direction for saving fake quantization model")
+    parser.add_argument("--no_save_params", default=False, action="store_true", help="Do not save quant parameters.")
     parser.add_argument("--resume", type=str, default=None)
     parser.add_argument("--real_quant", default=False, action="store_true",)
     parser.add_argument("--calib_dataset",type=str,default="wikitext2",
@@ -204,6 +205,10 @@ def main():
         help="Where to extract calibration data from.",
     )
     parser.add_argument("--nsamples", type=int, default=128, help="Number of calibration data samples.")
+    parser.add_argument("--start_sample", type=int, default=0, help="Start calibration sample number.")
+    parser.add_argument("--keep_samples_on_disk", default=False, action="store_true", help="To keep samples on disk (need samples_dir also).")
+    parser.add_argument("--samples_dir", default=None, type=str, help="Folder for saving quant inputs (if num_samples is large).")
+    parser.add_argument("--keep_samples_on_cpu", default=False, action="store_true", help="To keep samples on CPU instead of GPU.")
     parser.add_argument("--batch_size", type=int, default=1, help="batch size.")
     parser.add_argument("--seed", type=int, default=2, help="Seed for sampling the calibration data.")
     parser.add_argument("--tasks", default="")
@@ -213,13 +218,19 @@ def main():
     parser.add_argument("--abits", type=int, default=4)
     parser.add_argument("--group_size", type=int, default=None)
     parser.add_argument("--alpha", type=float, default=0.5)
+    parser.add_argument("--use_lr_scheduler", default=False, action="store_true", help="Use cosine annealing LR scheduler.")
     parser.add_argument("--let_lr", type=float, default=5e-3)
     parser.add_argument("--lwc_lr", type=float, default=1e-2)
+    parser.add_argument("--ada_lr", type=float, default=1e-2)
     parser.add_argument("--wd", type=float, default=0)
     parser.add_argument("--epochs", type=int, default=10)
     parser.add_argument("--let",default=False, action="store_true",help="activate learnable equivalent transformation")
     parser.add_argument("--lwc",default=False, action="store_true",help="activate learnable weight clipping")
     parser.add_argument("--adaround", default=False, action="store_true", help="AdaRound")
+    parser.add_argument("--adaqround", default=False, action="store_true", help="AdaRound v2")
+    parser.add_argument("--delta_round", type=int, default=1, help="Determines delta range for AdaRound v2 (vanilla AdaRound means delta_round = 0).")
+    parser.add_argument("--hard_freq", type=int, default=3, help="Num times out of ten for hard AdaRound v2 quantization during training.")
+    parser.add_argument("--no_ord_loss", default=False, action="store_true", help="No ordinary omniquant loss.")
     parser.add_argument("--aug_loss", default=False, action="store_true", help="calculate additional loss with same input")
     parser.add_argument("--symmetric",default=False, action="store_true", help="symmetric quantization")
     parser.add_argument("--a_dynamic_method", type=str, default="per_token", choices=["per_token"])
@@ -283,6 +294,9 @@ def main():
         "group_size": args.group_size,
         "lwc": args.lwc,
         "adaround": args.adaround,
+        "adaqround": args.adaqround,
+        "delta_round": args.delta_round,
+        "hard_freq": args.hard_freq,
     }
     args.act_quant_params = {
         "n_bits":  args.abits,
@@ -328,17 +342,18 @@ def main():
     print(f'Loading act shifts from {args.act_shifts}.')
 
     # quantization
-    if args.wbits < 16 or args.abits <16:
+    if args.wbits < 16 or args.abits < 16:
         logger.info("=== start quantization ===")
         tick = time.time()     
         # load calibration dataset
-        cache_dataloader = f'{args.cache_dir}/dataloader_{args.model_family}_{args.calib_dataset}_{args.nsamples}.cache'
+        cache_dataloader = f'{args.cache_dir}/dataloader_{args.model_family}_{args.calib_dataset}_{args.nsamples}_{args.start_sample}.cache'
         if os.path.exists(cache_dataloader):
             dataloader = torch.load(cache_dataloader)
             logger.info(f"load calibration from {cache_dataloader}")
         else:
             dataloader, _ = get_loaders(
                 args.calib_dataset,
+                start_sample=args.start_sample,
                 nsamples=args.nsamples,
                 seed=args.seed,
                 model=args.model,
